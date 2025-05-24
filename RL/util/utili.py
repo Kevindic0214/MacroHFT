@@ -1,15 +1,7 @@
-import torch
-import numpy as np
-from collections import deque, namedtuple
-import random
-import pdb
-
-
 def get_ada(ada,decay_freq=2,ada_counter=0, decay_coffient=0.5):
     if ada_counter % decay_freq==1:
         ada = decay_coffient*ada
     return ada
-
 
 def get_epsilon( epsilon,max_epsilon=1, epsilon_counter=0, decay_freq=2,decay_coffient=0.5):
     if epsilon_counter%decay_freq == 1:
