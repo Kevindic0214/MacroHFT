@@ -13,16 +13,20 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
-from env.low_level_env import Testing_Env, Training_Env
-from model.net import subagent
-from RL.util.replay_buffer import ReplayBuffer
-from RL.util.utili import LinearDecaySchedule
-
 warnings.filterwarnings("ignore")
 
 ROOT = str(pathlib.Path(__file__).resolve().parents[3])
 sys.path.append(ROOT)
 sys.path.insert(0, ".")
+
+print(f"Current file: {__file__}")
+print(f"ROOT directory: {ROOT}")
+print(f"Python path: {sys.path}")
+
+from env.low_level_env import Testing_Env, Training_Env
+from model.net import subagent
+from RL.util.replay_buffer import ReplayBuffer
+from RL.util.utili import LinearDecaySchedule
 
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
