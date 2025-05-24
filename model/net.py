@@ -1,14 +1,5 @@
-from logging import raiseExceptions
 import torch
-import pdb
-import numpy as np
-import pandas as pd
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.distributions.categorical import Categorical
-import math
-import sys
-import os
 
 max_punish = 1e12
 
@@ -54,7 +45,6 @@ class subagent(nn.Module):
         advantage = self.advantage(x)
         
         return value + advantage - advantage.mean()
-
 
 
 class hyperagent(nn.Module):
