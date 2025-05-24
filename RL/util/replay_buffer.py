@@ -1,11 +1,7 @@
-import torch
 import random
+
 import numpy as np
-from collections import deque
-from torch.utils.data import Dataset, DataLoader
-import pdb
-
-
+import torch
 
 class ReplayBuffer(object):
     def __init__(self, args, state_dim, state_dim_2, action_dim):
@@ -100,7 +96,7 @@ class ReplayBuffer_High(object):
             self.count] = next_previous_action
         self.buffer["next_demo_action"][self.count] = next_demo_action
         self.buffer["terminal"][self.count] = terminal
-        self.buffer["q_memory"][self.count] = q_memory
+        self.buffer["q_memory"][self.count] = float(q_memory[0]) if (hasattr(q_memory, "__len__") and len(q_memory) > 0) else float(q_memory)
         self.count = (self.count + 1) % self.buffer_capacity  # When the 'count' reaches buffer_capacity, it will be reset to 0.
         self.current_size = min(self.current_size + 1, self.buffer_capacity)
 
