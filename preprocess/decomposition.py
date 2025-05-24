@@ -28,20 +28,23 @@ def chunk(df_train, df_val, df_test):
     for i in range(int(len(df_train) / chunk_size)):
         start = i * chunk_size
         end = (i + 1) * chunk_size
-        df_chunk = df_train[start:end].reset_index(drop=True)
-        df_chunk.to_feather('./data/ETHUSDT/train/df_{}.feather'.format(i))
+        if end <= len(df_train):
+            df_chunk = df_train[start:end].reset_index(drop=True)
+            df_chunk.to_feather('./data/ETHUSDT/train/df_{}.feather'.format(i))
 
     for i in range(int(len(df_val) / chunk_size)):
         start = i * chunk_size
         end = (i + 1) * chunk_size
-        df_chunk = df_val[start:end].reset_index(drop=True)
-        df_chunk.to_feather('./data/ETHUSDT/val/df_{}.feather'.format(i))
+        if end <= len(df_val):
+            df_chunk = df_val[start:end].reset_index(drop=True)
+            df_chunk.to_feather('./data/ETHUSDT/val/df_{}.feather'.format(i))
 
     for i in range(int(len(df_test) / chunk_size)):
         start = i * chunk_size
         end = (i + 1) * chunk_size
-        df_chunk = df_test[start:end].reset_index(drop=True)
-        df_chunk.to_feather('./data/ETHUSDT/test/df_{}.feather'.format(i))
+        if end <= len(df_test):
+            df_chunk = df_test[start:end].reset_index(drop=True)
+            df_chunk.to_feather('./data/ETHUSDT/test/df_{}.feather'.format(i))
 
 def label_slope(df_train, df_val, df_test):
     chunk_size = 4320
@@ -49,28 +52,31 @@ def label_slope(df_train, df_val, df_test):
     for i in range(0, int(len(df_train) / chunk_size)):
         start = i * chunk_size
         end = (i + 1) * chunk_size
-        chunk = df_train['close'][start:end].values
-        smoothed_chunk = smooth_data(chunk)
-        slope = get_slope(smoothed_chunk)
-        slopes_train.append(slope)
+        if end <= len(df_train):
+            chunk = df_train['close'][start:end].values
+            smoothed_chunk = smooth_data(chunk)
+            slope = get_slope(smoothed_chunk)
+            slopes_train.append(slope)
 
     slopes_val = []
     for i in range(0, int(len(df_val) / chunk_size)):
         start = i * chunk_size
         end = (i + 1) * chunk_size
-        chunk = df_val['close'][start:end].values
-        smoothed_chunk = smooth_data(chunk)
-        slope = get_slope(smoothed_chunk)
-        slopes_val.append(slope)
+        if end <= len(df_val):
+            chunk = df_val['close'][start:end].values
+            smoothed_chunk = smooth_data(chunk)
+            slope = get_slope(smoothed_chunk)
+            slopes_val.append(slope)
 
     slopes_test = []
     for i in range(0, int(len(df_test) / chunk_size)):
         start = i * chunk_size
         end = (i + 1) * chunk_size
-        chunk = df_test['close'][start:end].values
-        smoothed_chunk = smooth_data(chunk)
-        slope = get_slope(smoothed_chunk)
-        slopes_test.append(slope)
+        if end <= len(df_test):
+            chunk = df_test['close'][start:end].values
+            smoothed_chunk = smooth_data(chunk)
+            slope = get_slope(smoothed_chunk)
+            slopes_test.append(slope)
 
     quantiles = [0, 0.05, 0.35, 0.65, 0.95, 1]
     slope_labels_train, bins = pd.qcut(slopes_train, q=quantiles, retbins=True, labels=False)
@@ -107,28 +113,31 @@ def label_volatility(df_train, df_val, df_test):
     for i in range(0, int(len(df_train) / chunk_size)):
         start = i * chunk_size
         end = (i + 1) * chunk_size
-        chunk = df_train[start:end]
-        chunk['return'] = chunk['close'].pct_change().fillna(0)
-        volatility = chunk['return'].std()
-        volatilities_train.append(volatility)
+        if end <= len(df_train):
+            chunk = df_train[start:end].copy()
+            chunk['return'] = chunk['close'].pct_change().fillna(0)
+            volatility = chunk['return'].std()
+            volatilities_train.append(volatility)
 
     volatilities_val = []
     for i in range(0, int(len(df_val) / chunk_size)):
         start = i * chunk_size
         end = (i + 1) * chunk_size
-        chunk = df_val[start:end]
-        chunk['return'] = chunk['close'].pct_change().fillna(0)
-        volatility = chunk['return'].std()
-        volatilities_val.append(volatility)
+        if end <= len(df_val):
+            chunk = df_val[start:end].copy()
+            chunk['return'] = chunk['close'].pct_change().fillna(0)
+            volatility = chunk['return'].std()
+            volatilities_val.append(volatility)
     
     volatilities_test = []
     for i in range(0, int(len(df_test) / chunk_size)):
         start = i * chunk_size
         end = (i + 1) * chunk_size
-        chunk = df_test[start:end]
-        chunk['return'] = chunk['close'].pct_change().fillna(0)
-        volatility = chunk['return'].std()
-        volatilities_test.append(volatility)
+        if end <= len(df_test):
+            chunk = df_test[start:end].copy()
+            chunk['return'] = chunk['close'].pct_change().fillna(0)
+            volatility = chunk['return'].std()
+            volatilities_test.append(volatility)
 
     quantiles = [0, 0.05, 0.35, 0.65, 0.95, 1]
     vol_labels_train, bins = pd.qcut(volatilities_train, q=quantiles, retbins=True, labels=False)
@@ -160,6 +169,7 @@ def label_volatility(df_train, df_val, df_test):
         pickle.dump(test_indices, file)
 
 def label_whole(df):
+    df = df.copy()
     window_size_list = [360]
     for i in range(len(window_size_list)):
         window_size = window_size_list[i]
@@ -189,6 +199,3 @@ if __name__ == "__main__":
     df_train.to_feather('./data/ETHUSDT/whole/train.feather')
     df_val.to_feather('./data/ETHUSDT/whole/val.feather')
     df_test.to_feather('./data/ETHUSDT/whole/test.feather')
-
-
-    
