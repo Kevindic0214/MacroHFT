@@ -1,1 +1,1 @@
-nohup python -u preprocess/decomposition.py
+nohup python -u preprocess/decomposition.py > ./logs/decomposition.log 2>&1 &
