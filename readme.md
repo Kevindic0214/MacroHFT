@@ -8,8 +8,8 @@ https://arxiv.org/abs/2406.14537
 Create a conda environment with Python 3.9:
 
 ```bash
-conda create -n macroHFT python=3.9
-conda activate macroHFT
+conda create -n macrohft python=3.9
+conda activate macrohft
 ```
 
 ### Install Requirements
