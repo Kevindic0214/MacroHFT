@@ -4,8 +4,6 @@ import sys
 import numpy as np
 import torch
 
-from model.net import *
-
 ROOT = str(pathlib.Path(__file__).resolve().parents[3])
 sys.path.append(ROOT)
 sys.path.insert(0, ".")
