@@ -179,6 +179,8 @@ def label_whole(df):
     return df
 
 if __name__ == "__main__":
+    os.makedirs('./data/ETHUSDT', exist_ok=True)
+    
     df_train = pd.read_feather('./data/ETHUSDT/df_train.feather')
     df_val = pd.read_feather('./data/ETHUSDT/df_val.feather')
     df_test = pd.read_feather('./data/ETHUSDT/df_test.feather')
