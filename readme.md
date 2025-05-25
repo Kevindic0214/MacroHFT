@@ -19,11 +19,28 @@ pip install -r requirements.txt
 
 ## Running the Demo
 
-You may first download the dataset from Google Drive:
+### Data Preparation
 
-https://drive.google.com/drive/folders/1AYHy-wUV0IwPoA7E1zvMRPL3wK0tPNiY?usp=drive_link
+1. Download the dataset from Google Drive:
 
-and put the folder under data folder.
+   https://drive.google.com/drive/folders/1AYHy-wUV0IwPoA7E1zvMRPL3wK0tPNiY?usp=drive_link
+
+2. Create the data/ETHUSDT directory if it doesn't exist:
+
+   ```bash
+   mkdir -p data/ETHUSDT
+   ```
+
+3. Extract and place all downloaded files inside the data/ETHUSDT directory. The final structure should look like:
+
+   ```
+   data/
+     └── ETHUSDT/
+         ├── df_test.feather
+         ├── df_train.feather
+         ├── df_val.feather
+         └── ...
+   ```
 
 ## Running the Pipeline
 
