@@ -24,7 +24,7 @@ print(f"ROOT directory: {ROOT}")
 print(f"Python path: {sys.path}")
 
 from env.low_level_env import Testing_Env, Training_Env
-from model.net import subagent
+from model.net import *
 from RL.util.replay_buffer import ReplayBuffer
 from RL.util.utili import LinearDecaySchedule
 
@@ -374,7 +374,7 @@ class DQN(object):
             epoch_reward_sum_train_list = []
         best_model_path = os.path.join("./result/low_level", 
                                         '{}'.format(self.dataset), '{}'.format(self.clf), str(self.label), 'best_model.pkl')
-        torch.save(best_model.state_dict(), best_model_path)
+        torch.save(best_model, best_model_path)
 
 
     def val_cluster(self, epoch_path, save_path, initial_action):
