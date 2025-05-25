@@ -1,27 +1,28 @@
-import pathlib
-import sys
-import random
 import argparse
+import os
+import pathlib
+import random
+import sys
+import warnings
 
+import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import yaml
-import os
-import joblib
 from torch.utils.tensorboard import SummaryWriter
-import warnings
+
 warnings.filterwarnings("ignore")
 
 ROOT = str(pathlib.Path(__file__).resolve().parents[3])
 sys.path.append(ROOT)
 sys.path.insert(0, ".")
 
-from MacroHFT.model.net import *
-from MacroHFT.env.high_level_env import Testing_Env, Training_Env
-from MacroHFT.RL.util.utili import get_ada, get_epsilon, LinearDecaySchedule
-from MacroHFT.RL.util.replay_buffer import ReplayBuffer_High
-from MacroHFT.RL.util.memory import episodicmemory
+from env.high_level_env import Testing_Env, Training_Env
+from model.net import hyperagent, subagent
+from RL.util.memory import episodicmemory
+from RL.util.replay_buffer import ReplayBuffer_High
+from RL.util.utili import LinearDecaySchedule
 
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
@@ -476,14 +477,14 @@ class DQN(object):
             epoch_reward_sum_train_list = []
         best_model_path = os.path.join("./result/high_level", 
                                         '{}'.format(self.dataset), 'best_model.pkl')
-        torch.save(best_model.state_dict(), best_model_path)
+        torch.save(best_model, best_model_path)
         final_result_path = os.path.join("./result/high_level", '{}'.format(self.dataset))
         self.test_cluster(best_model_path, final_result_path)
 
 
-    def val_cluster(self, epoch_path, save_path):
+    def val_cluster(self, model_path, save_path):
         self.hyperagent.load_state_dict(
-            torch.load(os.path.join(epoch_path, "trained_model.pkl")))
+            torch.load(os.path.join(model_path, "trained_model.pkl")))
         self.hyperagent.eval()
         counter = False
         action_list = []
@@ -592,8 +593,6 @@ class DQN(object):
         np.save(os.path.join(save_path, "commission_fee_history.npy"),
                 commission_fee_list)
             
-
-
 if __name__ == "__main__":
     args = parser.parse_args()
     print(args)
