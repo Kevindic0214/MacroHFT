@@ -372,8 +372,13 @@ class DQN(object):
             epoch_final_balance_train_list = []
             epoch_required_money_train_list = []
             epoch_reward_sum_train_list = []
-        best_model_path = os.path.join("./result/low_level", 
-                                        '{}'.format(self.dataset), '{}'.format(self.clf), str(self.label), 'best_model.pkl')
+        best_model_dir = os.path.join("./result/low_level", 
+                                    '{}'.format(self.dataset), '{}'.format(self.clf), str(self.label))
+
+        if not os.path.exists(best_model_dir):
+            os.makedirs(best_model_dir)
+
+        best_model_path = os.path.join(best_model_dir, 'best_model.pkl')
         torch.save(best_model, best_model_path)
 
 
