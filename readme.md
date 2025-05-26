@@ -24,17 +24,17 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 
 **CUDA 11.8 version:**
 ```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu118
 ```
 
-**CUDA 12.1 version:**
+**CUDA 12.1 version (original):**
 ```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 ```
 
-**CUDA 12.4 version (original):**
+**CUDA 12.6 version:**
 ```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu126
 ```
 
 ### Install Other Requirements
