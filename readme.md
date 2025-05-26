@@ -12,10 +12,38 @@ conda create -n macrohft python=3.9
 conda activate macrohft
 ```
 
-### Install Requirements
+### Install PyTorch
+Please install the appropriate PyTorch version for your GPU configuration. Visit the [PyTorch official website](https://pytorch.org/get-started/locally/) to select the version that suits your system.
+
+Example installation commands:
+
+**CPU version:**
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+```
+
+**CUDA 11.8 version:**
+```bash
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu118
+```
+
+**CUDA 12.4 version (original):**
+```bash
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+```
+
+**CUDA 12.6 version:**
+```bash
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu126
+```
+
+### Install Other Requirements
+Install other necessary packages:
 ```bash
 pip install -r requirements.txt
 ```
+
+**Note:** If you install a different version of PyTorch, the PyTorch-related packages in requirements.txt may be overridden, which is normal.
 
 ## Running the Demo
 
