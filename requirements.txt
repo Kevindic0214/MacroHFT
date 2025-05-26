@@ -17,6 +17,7 @@ packaging
 pandas
 pillow
 protobuf
+pyarrow
 python-dateutil
 pytz
 PyYAML
