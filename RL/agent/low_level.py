@@ -24,7 +24,7 @@ print(f"ROOT directory: {ROOT}")
 print(f"Python path: {sys.path}")
 
 from env.low_level_env import Testing_Env, Training_Env
-from model.net import *
+from model.net import subagent
 from RL.util.replay_buffer import ReplayBuffer
 from RL.util.utili import LinearDecaySchedule
 
@@ -379,8 +379,10 @@ class DQN(object):
             os.makedirs(best_model_dir)
 
         best_model_path = os.path.join(best_model_dir, 'best_model.pkl')
-        torch.save(best_model, best_model_path)
-
+        if isinstance(best_model, dict) or hasattr(best_model, 'keys'):
+            torch.save(best_model, best_model_path)
+        else:
+            torch.save(best_model.state_dict(), best_model_path)  # 完整模型
 
     def val_cluster(self, epoch_path, save_path, initial_action):
         self.eval_net.load_state_dict(
