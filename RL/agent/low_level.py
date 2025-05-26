@@ -162,26 +162,34 @@ class DQN(object):
 
     def update(self, replay_buffer):
         self.eval_net.train()
-        batch, _, _ = replay_buffer.sample()
+        batch, tree_indices, IS_weights = replay_buffer.sample()
+        if batch is None:
+            return torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0)
+
+        IS_weights_tensor = torch.tensor(IS_weights, device=self.device, dtype=torch.float32)
+
         batch = {k: v.to(self.device) for k, v in batch.items()}
         a_argmax = self.eval_net(batch['next_state'], batch['next_state_trend'], batch['next_previous_action']).argmax(dim=-1, keepdim=True)
-        q_target = batch['reward'] + self.gamma * (1 - batch['terminal']) * self.target_net(batch['next_state'], batch['next_state_trend'], 
+        q_target_next = self.target_net(batch['next_state'], batch['next_state_trend'], 
                                                     batch['next_previous_action']).gather(-1, a_argmax).squeeze(-1)
+        q_target = batch['reward'] + self.gamma * (1 - batch['terminal']) * q_target_next
 
         q_distribution = self.eval_net(batch['state'], batch['state_trend'], batch['previous_action'])
         q_current = q_distribution.gather(-1, batch['action']).squeeze(-1)
 
-        td_error = self.loss_func(q_current, q_target)
+        element_wise_td_error = q_current - q_target
 
-        demonstration = batch['demo_action']
+        loss_td = (IS_weights_tensor.squeeze() * (element_wise_td_error ** 2)).mean()
+
+        teacher_q_values_batch = batch['teacher_q_values']
         KL_loss = F.kl_div(
             (q_distribution.softmax(dim=-1) + 1e-8).log(),
-            (demonstration.softmax(dim=-1) + 1e-8),
+            (teacher_q_values_batch.softmax(dim=-1) + 1e-8),
             reduction="batchmean",
         )
 
-        alpha = args.alpha
-        loss = td_error + alpha * KL_loss
+        alpha_imitation = args.alpha
+        loss = loss_td + alpha_imitation * KL_loss
         self.optimizer.zero_grad()
         loss.backward()
 
@@ -190,10 +198,13 @@ class DQN(object):
         for param, target_param in zip(self.eval_net.parameters(), self.target_net.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
+        abs_td_errors = element_wise_td_error.abs().detach().cpu().numpy()
+        replay_buffer.update_priorities(tree_indices, abs_td_errors)
+
         self.update_counter += 1
         self.eval_net.eval()
-        return td_error.cpu(), KL_loss.cpu(), torch.mean(
-            q_current.cpu()), torch.mean(q_target.cpu())
+        return loss_td.detach().cpu(), KL_loss.detach().cpu(), torch.mean(
+            q_current.detach().cpu()), torch.mean(q_target.detach().cpu())
 
     def hardupdate(self):
         self.target_net.load_state_dict(self.eval_net.state_dict())
