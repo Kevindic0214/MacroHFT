@@ -52,6 +52,10 @@ parser.add_argument("--alpha",type=float,default=0.5)
 parser.add_argument("--beta",type=int,default=5)
 parser.add_argument("--exp",type=str,default="exp1")
 parser.add_argument("--num_step",type=int,default=10)
+# 新增動態混合相關參數
+parser.add_argument("--use_dynamic_mixing",type=bool,default=True, help="是否使用動態混合策略")
+parser.add_argument("--mixing_loss_weight",type=float,default=0.1, help="混合策略損失權重")
+parser.add_argument("--strategy_consistency_weight",type=float,default=0.05, help="策略一致性損失權重")
 
 
 def seed_torch(seed):
@@ -84,6 +88,12 @@ class DQN(object):
                                         "data", args.dataset, "whole")
         self.dataset=args.dataset
         self.num_step = args.num_step
+        
+        # 新增動態混合相關屬性
+        self.use_dynamic_mixing = args.use_dynamic_mixing
+        self.mixing_loss_weight = args.mixing_loss_weight
+        self.strategy_consistency_weight = args.strategy_consistency_weight
+        
         if "BTC" in self.dataset:
             self.max_holding_number=0.01
         elif "ETH" in self.dataset:
@@ -115,6 +125,8 @@ class DQN(object):
         self.n_action = 2
         self.n_state_1 = len(self.tech_indicator_list)
         self.n_state_2 = len(self.tech_indicator_list_trend)
+        
+        # 初始化子代理
         self.slope_1 = subagent(
             self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
         self.slope_2 = subagent(
@@ -127,6 +139,8 @@ class DQN(object):
             self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
         self.vol_3 = subagent(
             self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)        
+            
+        # 加載預訓練的子代理模型
         model_list_slope = [
             "./result/low_level/ETHUSDT/best_model/slope/1/best_model.pkl", 
             "./result/low_level/ETHUSDT/best_model/slope/2/best_model.pkl",
@@ -155,6 +169,7 @@ class DQN(object):
         self.vol_1.eval()
         self.vol_2.eval()
         self.vol_3.eval()
+        
         self.slope_agents = {
             0: self.slope_1,
             1: self.slope_2,
@@ -165,9 +180,12 @@ class DQN(object):
             1: self.vol_2,
             2: self.vol_3
         }
+        
+        # 初始化超代理
         self.hyperagent = hyperagent(self.n_state_1, self.n_state_2, self.n_action, 32).to(self.device)
         self.hyperagent_target = hyperagent(self.n_state_1, self.n_state_2, self.n_action, 32).to(self.device)
         self.hyperagent_target.load_state_dict(self.hyperagent.state_dict())
+        
         self.update_times = args.update_times
         self.optimizer = torch.optim.Adam(self.hyperagent.parameters(),
                                           lr=args.lr)
@@ -186,6 +204,7 @@ class DQN(object):
         self.memory = episodicmemory(4320, 5, self.n_state_1, self.n_state_2, 64, self.device)
 
     def calculate_q(self, w, qs):
+        """計算加權Q值（兼容動態混合策略）"""
         q_tensor = torch.stack(qs)
         q_tensor = q_tensor.permute(1, 0, 2)
         weights_reshaped = w.view(-1, 1, 6)
@@ -193,38 +212,59 @@ class DQN(object):
         
         return combined_q
 
+    def get_agent_outputs(self, state, state_trend, previous_action):
+        """獲取所有子代理的Q值"""
+        qs = [
+            self.slope_agents[0](state, state_trend, previous_action),
+            self.slope_agents[1](state, state_trend, previous_action),
+            self.slope_agents[2](state, state_trend, previous_action),
+            self.vol_agents[0](state, state_trend, previous_action),
+            self.vol_agents[1](state, state_trend, previous_action),
+            self.vol_agents[2](state, state_trend, previous_action)
+        ]
+        return qs
 
     def update(self, replay_buffer):
         batch, _, _ = replay_buffer.sample()
         batch = {k: v.to(self.device) for k, v in batch.items()}
         
-        w_current = self.hyperagent(batch['state'], batch['state_trend'], batch['state_clf'], batch['previous_action'])
-        w_next = self.hyperagent_target(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
-        w_next_ = self.hyperagent(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
+        if self.use_dynamic_mixing:
+            # 動態混合策略的更新
+            hyperagent_output = self.hyperagent(
+                batch['state'], batch['state_trend'], batch['state_clf'], 
+                batch['previous_action'], use_dynamic_mixing=True
+            )
+            w_current, mixing_weights, soft_weights, hard_weights = hyperagent_output
+            
+            hyperagent_target_output = self.hyperagent_target(
+                batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], 
+                batch['next_previous_action'], use_dynamic_mixing=True
+            )
+            w_next, _, _, _ = hyperagent_target_output
+            
+            hyperagent_eval_output = self.hyperagent(
+                batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], 
+                batch['next_previous_action'], use_dynamic_mixing=True
+            )
+            w_next_, _, _, _ = hyperagent_eval_output
+        else:
+            # 傳統軟混合策略
+            w_current = self.hyperagent(batch['state'], batch['state_trend'], batch['state_clf'], batch['previous_action'], use_dynamic_mixing=False)
+            w_next = self.hyperagent_target(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'], use_dynamic_mixing=False)
+            w_next_ = self.hyperagent(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'], use_dynamic_mixing=False)
 
-
-        qs_current = [
-                    self.slope_agents[0](batch['state'], batch['state_trend'], batch['previous_action']),
-                    self.slope_agents[1](batch['state'], batch['state_trend'], batch['previous_action']),
-                    self.slope_agents[2](batch['state'], batch['state_trend'], batch['previous_action']),
-                    self.vol_agents[0](batch['state'], batch['state_trend'], batch['previous_action']),
-                    self.vol_agents[1](batch['state'], batch['state_trend'], batch['previous_action']),
-                    self.vol_agents[2](batch['state'], batch['state_trend'], batch['previous_action'])
-        ]
-        qs_next = [
-                    self.slope_agents[0](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.slope_agents[1](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.slope_agents[2](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.vol_agents[0](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.vol_agents[1](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.vol_agents[2](batch['next_state'], batch['next_state_trend'], batch['next_previous_action'])
-        ]
+        # 獲取所有子代理的Q值
+        qs_current = self.get_agent_outputs(batch['state'], batch['state_trend'], batch['previous_action'])
+        qs_next = self.get_agent_outputs(batch['next_state'], batch['next_state_trend'], batch['next_previous_action'])
+        
+        # 計算組合Q值
         q_distribution = self.calculate_q(w_current, qs_current)
         q_current = q_distribution.gather(-1, batch['action']).squeeze(-1)
         a_argmax = self.calculate_q(w_next_, qs_next).argmax(dim=-1, keepdim=True)
         q_nexts = self.calculate_q(w_next, qs_next)
         q_target = batch['reward'] + self.gamma * (1 - batch['terminal']) * q_nexts.gather(-1, a_argmax).squeeze(-1)
 
+        # 基礎損失
         td_error = self.loss_func(q_current, q_target)
         memory_error = self.loss_func(q_current, batch['q_memory'])
 
@@ -235,16 +275,50 @@ class DQN(object):
             reduction="batchmean",
         )
 
+        # 總損失
         loss = td_error + args.alpha * memory_error + args.beta * KL_loss
+        
+        # 動態混合策略的額外損失
+        if self.use_dynamic_mixing:
+            # 混合權重的正則化損失（鼓勵明確的策略選擇）
+            mixing_regularization = -torch.mean(
+                mixing_weights * torch.log(mixing_weights + 1e-8) + 
+                (1 - mixing_weights) * torch.log(1 - mixing_weights + 1e-8)
+            )
+            
+            # 策略一致性損失（減少頻繁切換）
+            if hasattr(self, 'prev_mixing_weights'):
+                consistency_loss = torch.mean(torch.abs(mixing_weights - self.prev_mixing_weights))
+            else:
+                consistency_loss = torch.tensor(0.0).to(self.device)
+            self.prev_mixing_weights = mixing_weights.detach()
+            
+            # 軟硬權重差異損失（鼓勵明確區分）
+            weight_diff_loss = -torch.mean(torch.sum(torch.abs(soft_weights - hard_weights), dim=-1))
+            
+            loss += (self.mixing_loss_weight * mixing_regularization + 
+                    self.strategy_consistency_weight * consistency_loss +
+                    0.01 * weight_diff_loss)
+
         self.optimizer.zero_grad()
         loss.backward()
 
         torch.nn.utils.clip_grad_norm_(self.hyperagent.parameters(), 1)
         self.optimizer.step()
+        
+        # 軟更新目標網絡
         for param, target_param in zip(self.hyperagent.parameters(), self.hyperagent_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
         self.update_counter += 1
-        return td_error.cpu(), memory_error.cpu(), KL_loss.cpu(), torch.mean(q_current.cpu()), torch.mean(q_target.cpu())
+        
+        # 返回損失信息
+        if self.use_dynamic_mixing:
+            return (td_error.cpu(), memory_error.cpu(), KL_loss.cpu(), 
+                   torch.mean(q_current.cpu()), torch.mean(q_target.cpu()),
+                   torch.mean(mixing_weights.cpu()), mixing_regularization.cpu())
+        else:
+            return (td_error.cpu(), memory_error.cpu(), KL_loss.cpu(), 
+                   torch.mean(q_current.cpu()), torch.mean(q_target.cpu()))
 
     def act(self, state, state_trend, state_clf, info):
         x1 = torch.FloatTensor(state).to(self.device)
@@ -253,16 +327,18 @@ class DQN(object):
         previous_action = torch.unsqueeze(
             torch.tensor(info["previous_action"]).long().to(self.device),
             0).to(self.device)
+            
         if np.random.uniform() < (1-self.epsilon):
-            qs = [
-                    self.slope_agents[0](x1, x2, previous_action),
-                    self.slope_agents[1](x1, x2, previous_action),
-                    self.slope_agents[2](x1, x2, previous_action),
-                    self.vol_agents[0](x1, x2, previous_action),
-                    self.vol_agents[1](x1, x2, previous_action),
-                    self.vol_agents[2](x1, x2, previous_action)
-            ]
-            w = self.hyperagent(x1, x2, x3, previous_action)
+            qs = self.get_agent_outputs(x1, x2, previous_action)
+            
+            if self.use_dynamic_mixing:
+                hyperagent_output = self.hyperagent(
+                    x1, x2, x3, previous_action, use_dynamic_mixing=True
+                )
+                w, _, _, _ = hyperagent_output
+            else:
+                w = self.hyperagent(x1, x2, x3, previous_action, use_dynamic_mixing=False)
+                
             actions_value = self.calculate_q(w, qs)
             action = torch.max(actions_value, 1)[1].data.cpu().numpy()
             action = action[0]
@@ -279,15 +355,17 @@ class DQN(object):
             previous_action = torch.unsqueeze(
                 torch.tensor(info["previous_action"]).long().to(self.device),
                 0).to(self.device)
-            qs = [
-                    self.slope_agents[0](x1, x2, previous_action),
-                    self.slope_agents[1](x1, x2, previous_action),
-                    self.slope_agents[2](x1, x2, previous_action),
-                    self.vol_agents[0](x1, x2, previous_action),
-                    self.vol_agents[1](x1, x2, previous_action),
-                    self.vol_agents[2](x1, x2, previous_action)
-            ]
-            w = self.hyperagent(x1, x2, x3, previous_action)
+                
+            qs = self.get_agent_outputs(x1, x2, previous_action)
+            
+            if self.use_dynamic_mixing:
+                hyperagent_output = self.hyperagent(
+                    x1, x2, x3, previous_action, use_dynamic_mixing=True
+                )
+                w, _, _, _ = hyperagent_output
+            else:
+                w = self.hyperagent(x1, x2, x3, previous_action, use_dynamic_mixing=False)
+                
             actions_value = self.calculate_q(w, qs)
             action = torch.max(actions_value, 1)[1].data.cpu().numpy()
             action = action[0]
@@ -300,15 +378,17 @@ class DQN(object):
         previous_action = torch.unsqueeze(
             torch.tensor(info["previous_action"]).long().to(self.device),
             0).to(self.device)
-        qs = [
-                self.slope_agents[0](x1, x2, previous_action),
-                self.slope_agents[1](x1, x2, previous_action),
-                self.slope_agents[2](x1, x2, previous_action),
-                self.vol_agents[0](x1, x2, previous_action),
-                self.vol_agents[1](x1, x2, previous_action),
-                self.vol_agents[2](x1, x2, previous_action)
-        ]
-        w = self.hyperagent(x1, x2, x3, previous_action)
+            
+        qs = self.get_agent_outputs(x1, x2, previous_action)
+        
+        if self.use_dynamic_mixing:
+            hyperagent_output = self.hyperagent(
+                x1, x2, x3, previous_action, use_dynamic_mixing=True
+            )
+            w, _, _, _ = hyperagent_output
+        else:
+            w = self.hyperagent(x1, x2, x3, previous_action, use_dynamic_mixing=False)
+            
         actions_value = self.calculate_q(w, qs)
         q = torch.max(actions_value, 1)[0].detach().cpu().numpy()
         
@@ -324,7 +404,6 @@ class DQN(object):
             hs = self.hyperagent.encode(x1, x2, previous_action).cpu().numpy()
         return hs
 
-
     def train(self):
         epoch_return_rate_train_list = []
         epoch_final_balance_train_list = []
@@ -336,11 +415,11 @@ class DQN(object):
         best_return_rate = -float('inf')
         best_model = None
         self.replay_buffer = ReplayBuffer_High(args, self.n_state_1, self.n_state_2, self.n_action) 
+        
         for sample in range(self.epoch_number):
             print('epoch ', epoch_counter + 1)
             self.df = pd.read_feather(
                 os.path.join(self.train_data_path, "train.feather"))
-            
             
             train_env = Training_Env(
                     df=self.df,
@@ -370,10 +449,15 @@ class DQN(object):
 
                 s, s2, s3, info = s_, s2_, s3_, info_
                 step_counter += 1
+                
                 if step_counter % self.eval_update_freq == 0 and step_counter > (
                         self.batch_size + self.n_step):
                     for i in range(self.update_times):
-                        td_error, memory_error, KL_loss, q_eval, q_target = self.update(self.replay_buffer)
+                        if self.use_dynamic_mixing:
+                            td_error, memory_error, KL_loss, q_eval, q_target, avg_mixing_weight, mixing_reg = self.update(self.replay_buffer)
+                        else:
+                            td_error, memory_error, KL_loss, q_eval, q_target = self.update(self.replay_buffer)
+                            
                         if self.update_counter % self.q_value_memorize_freq == 1:
                             self.writer.add_scalar(
                                 tag="td_error",
@@ -400,10 +484,34 @@ class DQN(object):
                                 scalar_value=q_target,
                                 global_step=self.update_counter,
                                 walltime=None)
+                            
+                            # 動態混合策略的額外日誌
+                            if self.use_dynamic_mixing:
+                                self.writer.add_scalar(
+                                    tag="avg_mixing_weight",
+                                    scalar_value=avg_mixing_weight,
+                                    global_step=self.update_counter,
+                                    walltime=None)
+                                self.writer.add_scalar(
+                                    tag="mixing_regularization",
+                                    scalar_value=mixing_reg,
+                                    global_step=self.update_counter,
+                                    walltime=None)
+                                
+                                # 記錄策略統計信息
+                                strategy_stats = self.hyperagent.get_strategy_stats()
+                                for key, value in strategy_stats.items():
+                                    self.writer.add_scalar(
+                                        tag=f"strategy_{key}",
+                                        scalar_value=value,
+                                        global_step=self.update_counter,
+                                        walltime=None)
+                    
                     if step_counter > 4320:
                         self.memory.re_encode(self.hyperagent)
                 if done:
                     break
+                    
             episode_counter += 1
             final_balance, required_money = train_env.final_balance, train_env.required_money
             self.writer.add_scalar(tag="return_rate_train",
@@ -426,7 +534,6 @@ class DQN(object):
             epoch_final_balance_train_list.append(final_balance)
             epoch_required_money_train_list.append(required_money)
             epoch_reward_sum_train_list.append(episode_reward_sum)
-                
 
             epoch_counter += 1
             self.epsilon = self.epsilon_scheduler.get_epsilon(epoch_counter)
@@ -434,6 +541,7 @@ class DQN(object):
             mean_final_balance_train = np.mean(epoch_final_balance_train_list)
             mean_required_money_train = np.mean(epoch_required_money_train_list)
             mean_reward_sum_train = np.mean(epoch_reward_sum_train_list)
+            
             self.writer.add_scalar(
                     tag="epoch_return_rate_train",
                     scalar_value=mean_return_rate_train,
@@ -458,6 +566,7 @@ class DQN(object):
                 global_step=epoch_counter,
                 walltime=None,
                 )
+                
             epoch_path = os.path.join(self.model_path,
                                         "epoch_{}".format(epoch_counter))
             if not os.path.exists(epoch_path):
@@ -475,12 +584,12 @@ class DQN(object):
             epoch_final_balance_train_list = []
             epoch_required_money_train_list = []
             epoch_reward_sum_train_list = []
+            
         best_model_path = os.path.join("./result/high_level", 
                                         '{}'.format(self.dataset), 'best_model.pkl')
         torch.save(best_model, best_model_path)
         final_result_path = os.path.join("./result/high_level", '{}'.format(self.dataset))
         self.test_cluster(best_model_path, final_result_path)
-
 
     def val_cluster(self, model_path, save_path):
         self.hyperagent.load_state_dict(
@@ -538,9 +647,9 @@ class DQN(object):
         return_rate = final_balance / required_money
         return return_rate
 
-    def test_cluster(self, epoch_path, save_path):
+    def test_cluster(self, model_path, save_path):
         self.hyperagent.load_state_dict(
-            torch.load(os.path.join(epoch_path, "trained_model.pkl")))
+            torch.load(model_path))
         self.hyperagent.eval()
         counter = False
         action_list = []
