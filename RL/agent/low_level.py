@@ -101,11 +101,9 @@ class DQN(object):
             print("Using CPU (no GPU acceleration available)")
         
         print(f"Selected device: {self.device}")
-        self.result_path = os.path.join("./result/low_level", 
-                                        '{}'.format(args.dataset), '{}'.format(args.clf), str(int(args.alpha)), args.label)
+        self.result_path = os.path.join(ROOT, "result/low_level", args.dataset, args.clf, str(int(args.alpha)), args.label)
         self.label = int(args.label.split('_')[1])
-        self.model_path = os.path.join(self.result_path,
-                                       "seed_{}".format(self.seed))
+        self.model_path = os.path.join(self.result_path, "seed_{}".format(self.seed))
         self.train_data_path = os.path.join(ROOT, "data", args.dataset, "train")
         self.val_data_path = os.path.join(ROOT, "data", args.dataset, "val")
         self.test_data_path = os.path.join(ROOT, "data", args.dataset, "test")
@@ -261,14 +259,14 @@ class DQN(object):
         self.replay_buffer = SequenceReplayBuffer(args, self.n_state_1, self.n_state_2, self.n_action, seq_len=self.back_time_length)   
         best_return_rate = -float('inf')
         best_model = None
-        for sample in range(self.epoch_number):
+        for sample in range(self.epoch_number): # self.epoch_number
             print('epoch ', epoch_counter + 1)
             random_list = self.train_index[self.label]
             random.shuffle(random_list)
             random_position_list = random.choices(range(self.n_action), k=df_number)
             print(random_list)
             
-            for i in range(df_number):
+            for i in range(df_number): # df_number
                 df_index = random_list[i]
                 print("training with df", df_index)
                 self.df = pd.read_feather(
@@ -396,9 +394,8 @@ class DQN(object):
             epoch_final_balance_train_list = []
             epoch_required_money_train_list = []
             epoch_reward_sum_train_list = []
-        best_model_path = os.path.join("./result/low_level", 
-                                        '{}'.format(self.dataset), '{}'.format(self.clf), str(self.label), 'best_model.pkl')
-        torch.save(best_model.state_dict(), best_model_path)
+        best_model_path = os.path.join(ROOT,"result/low_level", self.dataset, self.clf, str(self.label), 'best_model.pkl')
+        torch.save(best_model, best_model_path)
 
 
     def val_cluster(self, epoch_path, save_path, initial_action):
@@ -412,7 +409,7 @@ class DQN(object):
         final_balance_list = []
         required_money_list = []
         commission_fee_list = []
-        for i in range(df_number):
+        for i in range(df_number): # df_number
             print("validating on df", df_list[i])
             self.df = pd.read_feather(
                 os.path.join(self.val_data_path, "df_{}.feather".format(df_list[i])))
@@ -461,7 +458,6 @@ class DQN(object):
         np.save(os.path.join(save_path, "return_rate_mean_val_{}.npy".format(initial_action)),
                 return_rate_mean)
         return return_rate_mean
-        
         
             
 if __name__ == "__main__":
