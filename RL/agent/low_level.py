@@ -24,7 +24,7 @@ print(f"ROOT directory: {ROOT}")
 print(f"Python path: {sys.path}")
 
 from env.low_level_env import Testing_Env, Training_Env
-from model.net import *
+from model.net import subagent
 from RL.util.replay_buffer import ReplayBuffer
 from RL.util.utili import LinearDecaySchedule
 
@@ -168,6 +168,12 @@ class DQN(object):
 
         IS_weights_tensor = torch.tensor(IS_weights, device=self.device, dtype=torch.float32)
 
+        if hasattr(replay_buffer, 'PER_b') and hasattr(replay_buffer, 'max_priority'):
+            self.writer.add_scalar('PER/beta', replay_buffer.PER_b, global_step=self.update_counter)
+            self.writer.add_scalar('PER/avg_IS_weight', IS_weights_tensor.mean().item(), global_step=self.update_counter)
+            self.writer.add_scalar('PER/max_IS_weight', IS_weights_tensor.max().item(), global_step=self.update_counter)
+            self.writer.add_scalar('PER/buffer_max_priority', replay_buffer.max_priority, global_step=self.update_counter)
+
         batch = {k: v.to(self.device) for k, v in batch.items()}
         a_argmax = self.eval_net(batch['next_state'], batch['next_state_trend'], batch['next_previous_action']).argmax(dim=-1, keepdim=True)
         q_target_next = self.target_net(batch['next_state'], batch['next_state_trend'], 
@@ -178,6 +184,7 @@ class DQN(object):
         q_current = q_distribution.gather(-1, batch['action']).squeeze(-1)
 
         element_wise_td_error = q_current - q_target
+        self.writer.add_scalar('TD_Error/abs_mean_raw', element_wise_td_error.abs().mean().item(), global_step=self.update_counter)
 
         loss_td = (IS_weights_tensor.squeeze() * (element_wise_td_error ** 2)).mean()
 
