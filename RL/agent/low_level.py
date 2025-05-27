@@ -394,13 +394,14 @@ class DQN(object):
             epoch_final_balance_train_list = []
             epoch_required_money_train_list = []
             epoch_reward_sum_train_list = []
-        best_model_path = os.path.join(ROOT,"result/low_level", self.dataset, self.clf, str(self.label), 'best_model.pkl')
+        best_model_path = os.path.join(ROOT, "result/low_level",self.dataset,self.clf,str(self.label),'best_model.pkl')
+        best_model_dir = os.path.dirname(best_model_path)
+        os.makedirs(best_model_dir, exist_ok=True)
         torch.save(best_model, best_model_path)
 
 
     def val_cluster(self, epoch_path, save_path, initial_action):
-        self.eval_net.load_state_dict(
-            torch.load(os.path.join(epoch_path, "trained_model.pkl")))
+        self.eval_net.load_state_dict(torch.load(os.path.join(epoch_path, "trained_model.pkl")))
         self.eval_net.eval()
         df_list = self.val_index[self.label]
         df_number=int(len(df_list)) 
