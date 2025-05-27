@@ -19,10 +19,6 @@ ROOT = str(pathlib.Path(__file__).resolve().parents[3])
 sys.path.append(ROOT)
 sys.path.insert(0, ".")
 
-print(f"Current file: {__file__}")
-print(f"ROOT directory: {ROOT}")
-print(f"Python path: {sys.path}")
-
 from env.low_level_env import Testing_Env, Training_Env
 from model.net import subagent
 from RL.util.replay_buffer import ReplayBuffer
@@ -80,8 +76,16 @@ class DQN(object):
             self.device = torch.device(args.device)
         else:
             self.device = torch.device("cpu")
+        
+        # C51 parameters (consistent for agent and teacher generation)
+        self.v_min = -5.0
+        self.v_max = 5.0
+        self.num_atoms = 51
+        self.support = torch.linspace(self.v_min, self.v_max, self.num_atoms).to(self.device)
+        self.delta_z = (self.v_max - self.v_min) / (self.num_atoms - 1)
+
         self.result_path = os.path.join("./result/low_level", 
-                                        '{}'.format(args.dataset), '{}'.format(args.clf), str(int(args.alpha)), args.label)
+                                        '{}'.format(args.dataset), '{}.{}'.format(args.clf, "C51"), str(float(args.alpha)), args.label) # Use float for alpha in path
         self.label = int(args.label.split('_')[1])
         self.model_path = os.path.join(self.result_path,
                                        "seed_{}".format(self.seed))
@@ -140,14 +144,13 @@ class DQN(object):
         self.n_state_1 = len(self.tech_indicator_list)
         self.n_state_2 = len(self.tech_indicator_list_trend)
         self.eval_net, self.target_net = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device), subagent(
+            self.n_state_1, self.n_state_2, self.n_action, 64, self.num_atoms, self.v_min, self.v_max).to(self.device), subagent(
                 self.n_state_1, self.n_state_2, self.n_action,
-                64).to(self.device)
+                64, self.num_atoms, self.v_min, self.v_max).to(self.device)
         self.hardupdate()
         self.update_times = args.update_times
         self.optimizer = torch.optim.Adam(self.eval_net.parameters(),
                                           lr=args.lr)
-        self.loss_func = nn.MSELoss()
         self.batch_size = args.batch_size
         self.gamma = args.gamma
         self.tau = args.tau
@@ -166,79 +169,173 @@ class DQN(object):
         if batch is None:
             return torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0)
 
-        IS_weights_tensor = torch.tensor(IS_weights, device=self.device, dtype=torch.float32)
+        IS_weights_tensor = torch.tensor(IS_weights, device=self.device, dtype=torch.float32).squeeze()
 
         if hasattr(replay_buffer, 'PER_b') and hasattr(replay_buffer, 'max_priority'):
             self.writer.add_scalar('PER/beta', replay_buffer.PER_b, global_step=self.update_counter)
             self.writer.add_scalar('PER/avg_IS_weight', IS_weights_tensor.mean().item(), global_step=self.update_counter)
             self.writer.add_scalar('PER/max_IS_weight', IS_weights_tensor.max().item(), global_step=self.update_counter)
-            self.writer.add_scalar('PER/buffer_max_priority', replay_buffer.max_priority, global_step=self.update_counter)
+            if hasattr(replay_buffer, 'max_priority'):
+                 self.writer.add_scalar('PER/buffer_max_priority', replay_buffer.max_priority, global_step=self.update_counter)
 
+
+        current_batch_size = batch['state'].shape[0]
         batch = {k: v.to(self.device) for k, v in batch.items()}
-        a_argmax = self.eval_net(batch['next_state'], batch['next_state_trend'], batch['next_previous_action']).argmax(dim=-1, keepdim=True)
-        q_target_next = self.target_net(batch['next_state'], batch['next_state_trend'], 
-                                                    batch['next_previous_action']).gather(-1, a_argmax).squeeze(-1)
-        q_target = batch['reward'] + self.gamma * (1 - batch['terminal']) * q_target_next
 
-        q_distribution = self.eval_net(batch['state'], batch['state_trend'], batch['previous_action'])
-        q_current = q_distribution.gather(-1, batch['action']).squeeze(-1)
+        # C51: Calculate current Q-distribution for taken actions
+        q_logits_current = self.eval_net(batch['state'], batch['state_trend'], batch['previous_action'])
+        # Gather the logits for the action taken
+        action_indices = batch['action'].long()
+        # Reshape action_indices to (batch_size, 1, 1) and expand to match q_logits_current dim 2
+        action_indices_expanded = action_indices.unsqueeze(1).expand(-1, -1, self.num_atoms)
+        q_log_dist_current_action = F.log_softmax(q_logits_current.gather(1, action_indices_expanded).squeeze(1), dim=1)
 
-        element_wise_td_error = q_current - q_target
-        self.writer.add_scalar('TD_Error/abs_mean_raw', element_wise_td_error.abs().mean().item(), global_step=self.update_counter)
 
-        loss_td = (IS_weights_tensor.squeeze() * (element_wise_td_error ** 2)).mean()
+        with torch.no_grad():
+            # C51: Calculate target Q-distribution
+            q_logits_next = self.target_net(batch['next_state'], batch['next_state_trend'], batch['next_previous_action'])
+            q_dist_next = F.softmax(q_logits_next, dim=2) # (batch_size, num_actions, num_atoms)
 
-        teacher_q_values_batch = batch['teacher_q_values']
-        KL_loss = F.kl_div(
-            (q_distribution.softmax(dim=-1) + 1e-8).log(),
-            (teacher_q_values_batch.softmax(dim=-1) + 1e-8),
-            reduction="batchmean",
-        )
+            # DDQN: Use eval_net to select best next action
+            q_logits_next_eval = self.eval_net(batch['next_state'], batch['next_state_trend'], batch['next_previous_action'])
+            q_dist_next_eval = F.softmax(q_logits_next_eval, dim=2)
+            expected_q_values_next_eval = (q_dist_next_eval * self.support.unsqueeze(0).unsqueeze(0)).sum(2) # (batch_size, num_actions)
+            next_best_actions = expected_q_values_next_eval.argmax(dim=1) # (batch_size,)
+            
+            # Gather the Q-distribution for the next_best_actions from target_net's output
+            next_best_actions_expanded = next_best_actions.unsqueeze(1).unsqueeze(2).expand(-1, -1, self.num_atoms)
+            next_q_dist_target_action = q_dist_next.gather(1, next_best_actions_expanded).squeeze(1) # (batch_size, num_atoms)
 
-        alpha_imitation = args.alpha
+            # Compute target distribution projection
+            rewards = batch['reward'].unsqueeze(1) 
+            terminals = batch['terminal'].unsqueeze(1)
+            
+            Tz = rewards + (1 - terminals) * self.gamma * self.support.unsqueeze(0) # (batch_size, num_atoms)
+            Tz = Tz.clamp(min=self.v_min, max=self.v_max)
+
+            b = (Tz - self.v_min) / self.delta_z # (batch_size, num_atoms)
+            l = b.floor().long()
+            u = b.ceil().long()
+
+            # Fix for l == u cases, important for atoms at boundaries
+            # If l == u, it means Tz is exactly on an atom.
+            # Probability mass should go to l (or u).
+            # The (u-b) and (b-l) terms handle this naturally if not for floating point issues sometimes.
+            # Explicitly handle boundary cases for l and u for safety:
+            l.clamp_(0, self.num_atoms - 1)
+            u.clamp_(0, self.num_atoms - 1)
+            
+            m = torch.zeros(current_batch_size, self.num_atoms, device=self.device)
+            # Broadcasting for batch operation (more efficient than loop)
+            # Create batch indices for advanced indexing
+            batch_indices = torch.arange(current_batch_size, device=self.device).unsqueeze(1).expand_as(next_q_dist_target_action)
+
+            # Distribute probability of next_q_dist_target_action[b_idx, atom_idx]
+            # to m[b_idx, l[b_idx, atom_idx]] and m[b_idx, u[b_idx, atom_idx]]
+            m.scatter_add_(1, l, next_q_dist_target_action * (u.float() - b))
+            m.scatter_add_(1, u, next_q_dist_target_action * (b - l.float()))
+            # Ensure m sums to 1 (or very close) per row - usually it does due to projection.
+            # It represents the target probability distribution.
+
+        # C51: Calculate loss (Categorical Cross-Entropy)
+        # q_log_dist_current_action is already log_softmax
+        element_wise_loss = - (m * q_log_dist_current_action).sum(1) # (batch_size,)
+        
+        self.writer.add_scalar('TD_Error/abs_mean_raw_C51_XEntropy', element_wise_loss.abs().mean().item(), global_step=self.update_counter)
+
+        loss_td = (IS_weights_tensor * element_wise_loss).mean()
+
+        # Imitation Learning KL_loss 
+        KL_loss = torch.tensor(0.0, device=self.device)
+        alpha_imitation = float(args.alpha) # Ensure alpha is float for comparison
+
+        if alpha_imitation > 0:
+            # teacher_q_values from buffer has shape (batch_size, action_dim, num_atoms)
+            teacher_q_dist_all_actions = batch['teacher_q_values'] 
+            
+            # Gather the teacher distribution for the actions taken by the agent
+            # action_indices is (batch_size, 1), needs to be (batch_size, 1, 1) and expanded for gather
+            action_indices_for_teacher_gather = action_indices.unsqueeze(2).expand(-1, -1, self.num_atoms)
+            teacher_dist_taken_action = teacher_q_dist_all_actions.gather(1, action_indices_for_teacher_gather).squeeze(1)
+            # teacher_dist_taken_action shape: (batch_size, num_atoms)
+
+            # q_log_dist_current_action is log_softmax output from eval_net for the taken action
+            # teacher_dist_taken_action contains probabilities (from one-hot encoding in make_q_table_reward)
+            
+            # Ensure no zero probabilities in teacher_dist_taken_action before taking log if log_target=True
+            # However, F.kl_div with log_target=False expects target to be probabilities.
+            # We also need to handle the case where teacher_dist_taken_action might be zero everywhere if the
+            # one-hot encoding failed or if the Q value was exactly on a boundary in a way that scatter_add missed it.
+            # For one-hot, it should be fine. Add a small epsilon for stability if needed, but F.kl_div should handle it.
+
+            KL_loss_val = F.kl_div(
+                input=q_log_dist_current_action,  # log-probabilities from agent
+                target=teacher_dist_taken_action, # probabilities from teacher
+                reduction="batchmean",
+                log_target=False # Specifies that target is not log-probabilities
+            )
+            KL_loss = KL_loss_val
+
         loss = loss_td + alpha_imitation * KL_loss
+        
         self.optimizer.zero_grad()
         loss.backward()
 
-        torch.nn.utils.clip_grad_norm_(self.eval_net.parameters(), 1)
+        torch.nn.utils.clip_grad_norm_(self.eval_net.parameters(), 10) # Using 10 for C51, can be tuned
         self.optimizer.step()
         for param, target_param in zip(self.eval_net.parameters(), self.target_net.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
-        abs_td_errors = element_wise_td_error.abs().detach().cpu().numpy()
-        replay_buffer.update_priorities(tree_indices, abs_td_errors)
+        # Update PER priorities using the element-wise C51 loss
+        abs_errors_for_per = element_wise_loss.abs().detach().cpu().numpy()
+        replay_buffer.update_priorities(tree_indices, abs_errors_for_per)
 
         self.update_counter += 1
         self.eval_net.eval()
-        return loss_td.detach().cpu(), KL_loss.detach().cpu(), torch.mean(
-            q_current.detach().cpu()), torch.mean(q_target.detach().cpu())
+        
+        # Calculate expected Q-values for logging
+        with torch.no_grad():
+            q_dist_current_taken_action_softmax = F.softmax(q_logits_current.gather(1, action_indices_expanded).squeeze(1), dim=1)
+            expected_q_current = (q_dist_current_taken_action_softmax * self.support.unsqueeze(0)).sum(1).mean()
+            
+            # Target Q value is based on projected distribution m
+            expected_q_target = (m * self.support.unsqueeze(0)).sum(1).mean()
+
+
+        return loss_td.detach().cpu(), KL_loss.detach().cpu(), expected_q_current.cpu(), expected_q_target.cpu()
 
     def hardupdate(self):
         self.target_net.load_state_dict(self.eval_net.state_dict())
 
     def act(self, state, state_trend, info):
-        x1 = torch.FloatTensor(state).to(self.device)
-        x2 = torch.FloatTensor(state_trend).to(self.device)
-        previous_action = torch.unsqueeze(
-            torch.tensor(info["previous_action"]).long().to(self.device),
-            0).to(self.device)
+        x1 = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        x2 = torch.FloatTensor(state_trend).unsqueeze(0).to(self.device)
+        previous_action = torch.tensor([info["previous_action"]], dtype=torch.long).to(self.device)
+        
         if np.random.uniform() < (1-self.epsilon):
-            actions_value = self.eval_net(x1, x2, previous_action)
-            action = torch.max(actions_value, 1)[1].data.cpu().numpy()
-            action = action[0]
+            self.eval_net.eval()
+            with torch.no_grad():
+                q_logits = self.eval_net(x1, x2, previous_action)
+                q_dist = F.softmax(q_logits, dim=2)
+                # Calculate expected Q-values from the distribution
+                expected_q_values = (q_dist * self.support.unsqueeze(0).unsqueeze(0)).sum(2)
+                action = torch.max(expected_q_values, 1)[1].data.cpu().numpy()[0]
         else:
             action_choice = [0,1]
             action = random.choice(action_choice)
         return action
 
     def act_test(self, state, state_trend, info):
-        x1 = torch.FloatTensor(state).to(self.device)
-        x2 = torch.FloatTensor(state_trend).to(self.device)
-        previous_action = torch.unsqueeze(
-            torch.tensor(info["previous_action"]).long(), 0).to(self.device)
-        actions_value = self.eval_net(x1, x2, previous_action)
-        action = torch.max(actions_value, 1)[1].data.cpu().numpy()
-        action = action[0]
+        x1 = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        x2 = torch.FloatTensor(state_trend).unsqueeze(0).to(self.device)
+        previous_action = torch.tensor([info["previous_action"]], dtype=torch.long).to(self.device)
+        
+        self.eval_net.eval()
+        with torch.no_grad():
+            q_logits = self.eval_net(x1, x2, previous_action)
+            q_dist = F.softmax(q_logits, dim=2)
+            expected_q_values = (q_dist * self.support.unsqueeze(0).unsqueeze(0)).sum(2)
+            action = torch.max(expected_q_values, 1)[1].data.cpu().numpy()[0]
         return action
 
     def train(self):
@@ -251,7 +348,7 @@ class DQN(object):
         step_counter = 0
         episode_counter = 0
         epoch_counter = 0        
-        self.replay_buffer = ReplayBuffer(args, self.n_state_1, self.n_state_2, self.n_action)   
+        self.replay_buffer = ReplayBuffer(args, self.n_state_1, self.n_state_2, self.n_action, num_atoms=self.num_atoms)
         best_return_rate = -float('inf')
         best_model = None
         for sample in range(self.epoch_number):
@@ -276,7 +373,12 @@ class DQN(object):
                         back_time_length=self.back_time_length,
                         max_holding_number=self.max_holding_number,
                         initial_action=random_position_list[i],
-                        alpha = 0)
+                        alpha = float(args.alpha), # Pass agent's alpha, though env doesn't use it directly for q_table gen
+                        # Pass C51 parameters consistent with the agent for teacher signal generation
+                        v_min_teacher=self.v_min,
+                        v_max_teacher=self.v_max,
+                        num_atoms_teacher=self.num_atoms
+                        )
                 s, s2, info = train_env.reset()
                 episode_reward_sum = 0
                 

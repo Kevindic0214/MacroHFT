@@ -183,31 +183,32 @@ class Training_Env(Testing_Env):
         max_holding_number=max_holding_number,
         initial_action = 0,
         alpha=alpha,
+        v_min_teacher=-5.0, 
+        v_max_teacher=5.0, 
+        num_atoms_teacher=51
     ):
         super(Training_Env,
               self).__init__(df, tech_indicator_list, tech_indicator_list_trend, transcation_cost,
-                             back_time_length, max_holding_number)
+                             back_time_length, max_holding_number, initial_action=initial_action)
         self.q_table = make_q_table_reward(df,
-                                           num_action=2,
+                                           num_action=self.action_space.n,
                                            max_holding=max_holding_number,
-                                           commission_fee=0.001,
+                                           commission_fee=transcation_cost,
                                            reward_scale=1,
                                            gamma=0.99,
-                                           max_punish=1e12)
-        self.initial_action = initial_action
-
+                                           max_punish=1e12,
+                                           v_min=v_min_teacher,
+                                           v_max=v_max_teacher,
+                                           num_atoms=num_atoms_teacher)
 
     def reset(self):
         single_state, trend_state, info = super(Training_Env, self).reset()
-        self.previous_action = self.initial_action
-        self.previous_position = self.initial_action * self.max_holding_number
-        self.position = self.initial_action * self.max_holding_number
-        info['q_value'] = self.q_table[self.m - 1][self.previous_action][:]
+        info['q_value'] = self.q_table[self.m - 1][info['previous_action']][:, :]
         return single_state, trend_state, info
 
     def step(self, action):
         single_state, trend_state, reward, done, info = super(Training_Env, self).step(action)
-        info['q_value'] = self.q_table[self.m - 1][action][:]
+        info['q_value'] = self.q_table[self.m - 1][action][:, :]
         return single_state, trend_state, reward, done, info
 
 

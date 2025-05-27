@@ -8,43 +8,60 @@ def modulate(x, shift, scale):
 
 
 class subagent(nn.Module):
-    def __init__(self, state_dim_1, state_dim_2, action_dim, hidden_dim):
+    def __init__(self, state_dim_1, state_dim_2, action_dim, hidden_dim, num_atoms=51, v_min=-5.0, v_max=5.0):
         super(subagent, self).__init__()
+        self.action_dim = action_dim
+        self.num_atoms = num_atoms
         self.fc1 = nn.Linear(state_dim_1, hidden_dim)
         self.fc2 = nn.Linear(state_dim_2, hidden_dim)
         self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False, eps=1e-6)
-        self.embedding = nn.Embedding(action_dim, hidden_dim)
+        self.embedding = nn.Embedding(self.action_dim, hidden_dim)
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
             nn.Linear(hidden_dim, 2 * hidden_dim, bias=True)
         )
+
         self.advantage = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 4),
             nn.GELU(approximate="tanh"),
-            nn.Linear(hidden_dim * 4, action_dim)
+            nn.Linear(hidden_dim * 4, action_dim * num_atoms)
         )
         self.value = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 4),
             nn.GELU(approximate="tanh"),
-            nn.Linear(hidden_dim * 4, 1)
+            nn.Linear(hidden_dim * 4, num_atoms)
         )
 
         self.register_buffer("max_punish", torch.tensor(max_punish))
+        support = torch.linspace(v_min, v_max, num_atoms)
+        self.register_buffer('support', support)
 
     def forward(self, 
                 single_state: torch.tensor,
                 trend_state: torch.tensor,
                 previous_action: torch.tensor,):
+        if previous_action.dtype != torch.long:
+            previous_action = previous_action.long()
+
         action_hidden = self.embedding(previous_action)
         single_state_hidden = self.fc1(single_state)
         trend_state_hidden = self.fc2(trend_state)
         c = action_hidden + trend_state_hidden
-        shift, scale = self.adaLN_modulation(c).chunk(2, dim=1)
-        x = modulate(self.norm(single_state_hidden), shift, scale)
-        value = self.value(x)
-        advantage = self.advantage(x)
         
-        return value + advantage - advantage.mean()
+        ada_linear_layer = self.adaLN_modulation[-1]
+
+        modulated_c = self.adaLN_modulation(c)
+        
+        shift, scale = modulated_c.chunk(2, dim=-1) 
+
+        x = modulate(self.norm(single_state_hidden), shift, scale)
+        
+        value_logits = self.value(x).view(-1, 1, self.num_atoms)
+        advantage_logits = self.advantage(x).view(-1, self.action_dim, self.num_atoms)
+        
+        q_logits = value_logits + advantage_logits - advantage_logits.mean(dim=1, keepdim=True)
+        
+        return q_logits
 
 
 class hyperagent(nn.Module):

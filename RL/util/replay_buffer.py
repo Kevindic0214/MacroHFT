@@ -70,24 +70,28 @@ class ReplayBuffer(object):
     PER_b_increment_per_sampling = 0.001
     abs_err_upper = 1.  # Clipped abs error
 
-    def __init__(self, args, state_dim, state_dim_2, action_dim):
+    def __init__(self, args, state_dim, state_dim_2, action_dim, num_atoms=51):
         self.tree = SumTree(args.buffer_size)
         self.batch_size = args.batch_size
         self.buffer_capacity = args.buffer_size
         self.seed = args.seed
+        self.action_dim = action_dim # Store action_dim
+        self.num_atoms = num_atoms   # Store num_atoms
         np.random.seed(self.seed)
         random.seed(self.seed)
         torch.manual_seed(self.seed)
         self.buffer = {"state": np.zeros((self.buffer_capacity, state_dim)),
                         "state_trend": np.zeros((self.buffer_capacity, state_dim_2)),
                         "previous_action": np.zeros((self.buffer_capacity)),
-                        "teacher_q_values": np.zeros((self.buffer_capacity, action_dim)),
+                        # Teacher Q values are now distributions
+                        "teacher_q_values": np.zeros((self.buffer_capacity, self.action_dim, self.num_atoms)),
                         "action": np.zeros((self.buffer_capacity, 1)),
                         "reward": np.zeros(self.buffer_capacity),
                         "next_state": np.zeros((self.buffer_capacity, state_dim)),
                         "next_state_trend": np.zeros((self.buffer_capacity, state_dim_2)),
                         "next_previous_action": np.zeros((self.buffer_capacity)),
-                        "next_teacher_q_values": np.zeros((self.buffer_capacity, action_dim)),
+                        # Next teacher Q values are now distributions
+                        "next_teacher_q_values": np.zeros((self.buffer_capacity, self.action_dim, self.num_atoms)),
                         "terminal": np.zeros(self.buffer_capacity),
                        }
         self.max_priority = 1.0 # Initialize max_priority
