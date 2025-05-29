@@ -11,14 +11,18 @@ import sys
 import pathlib
 import pdb
 
-ROOT = str(pathlib.Path(__file__).resolve().parents[2])
-sys.path.append(ROOT)
-sys.path.insert(0, ".")
+# Get the path to the MacroHFT-main directory (parent of env directory)
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.append(str(PROJECT_ROOT))
 
-from MacroHFT.tools.demonstration import make_q_table_reward
+# Import the make_q_table_reward function directly from the tools directory
+from tools.demonstration import make_q_table_reward
 
-tech_indicator_list = np.load('./data/feature_list/single_features.npy', allow_pickle=True).tolist()
-tech_indicator_list_trend = np.load('./data/feature_list/trend_features.npy', allow_pickle=True).tolist()
+# Load feature lists using absolute paths
+single_features_path = PROJECT_ROOT / 'data' / 'feature_list' / 'single_features.npy'
+trend_features_path = PROJECT_ROOT / 'data' / 'feature_list' / 'trend_features.npy'
+tech_indicator_list = np.load(single_features_path, allow_pickle=True).tolist()
+tech_indicator_list_trend = np.load(trend_features_path, allow_pickle=True).tolist()
 clf_list = ['slope_360', 'vol_360']
 
 

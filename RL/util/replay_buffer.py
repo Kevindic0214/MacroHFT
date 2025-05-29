@@ -196,3 +196,127 @@ class ReplayBuffer_High(object):
                 batch[key] = torch.tensor(self.buffer[key][index], dtype=torch.float32)
 
         return batch, None, None
+
+class SequenceReplayBuffer_High(object):
+    """Supporting sequence data with high-level features (classification and Q-memory)"""
+    
+    def __init__(self, args, state_dim, state_dim_2, action_dim, seq_len=20):
+        self.batch_size = args.batch_size
+        self.buffer_capacity = args.buffer_size
+        self.seq_len = seq_len  
+        self.seed = args.seed
+        
+        np.random.seed(self.seed)
+        random.seed(self.seed)
+        torch.manual_seed(self.seed)
+        
+        self.current_size = 0
+        self.count = 0
+
+        self.buffer = {
+            "state": np.zeros((self.buffer_capacity, seq_len, state_dim)),
+            "state_trend": np.zeros((self.buffer_capacity, seq_len, state_dim_2)),
+            "state_clf": np.zeros((self.buffer_capacity, 2)),  # Classification features
+            "previous_action": np.zeros((self.buffer_capacity)),
+            "demo_action": np.zeros((self.buffer_capacity, action_dim)),
+            "action": np.zeros((self.buffer_capacity, 1)),
+            "reward": np.zeros(self.buffer_capacity),
+            "next_state": np.zeros((self.buffer_capacity, seq_len, state_dim)),
+            "next_state_trend": np.zeros((self.buffer_capacity, seq_len, state_dim_2)),
+            "next_state_clf": np.zeros((self.buffer_capacity, 2)),  # Next classification features
+            "next_previous_action": np.zeros((self.buffer_capacity)),
+            "next_demo_action": np.zeros((self.buffer_capacity, action_dim)),
+            "terminal": np.zeros(self.buffer_capacity),
+            "q_memory": np.zeros(self.buffer_capacity),  # Q-value memory
+        }
+        
+        print(f"SequenceReplayBuffer_High initialized:")
+        print(f"  Buffer capacity: {self.buffer_capacity}")
+        print(f"  Sequence length: {self.seq_len}")
+        print(f"  State shape: ({seq_len}, {state_dim})")
+        print(f"  State trend shape: ({seq_len}, {state_dim_2})")
+        print(f"  Classification features: 2D")
+        print(f"  Q-memory enabled: True")
+
+    def store_transition(self, state, state_trend, state_clf, previous_action, demo_action, 
+                        action, reward, next_state, next_state_trend, next_state_clf,
+                        next_previous_action, next_demo_action, terminal, q_memory):
+        # Shape assertions for sequence data
+        assert state.shape == (self.seq_len, self.buffer["state"].shape[2]), \
+            f"State shape mismatch: expected {(self.seq_len, self.buffer['state'].shape[2])}, got {state.shape}"
+        
+        assert state_trend.shape == (self.seq_len, self.buffer["state_trend"].shape[2]), \
+            f"State trend shape mismatch: expected {(self.seq_len, self.buffer['state_trend'].shape[2])}, got {state_trend.shape}"
+        
+        assert next_state.shape == (self.seq_len, self.buffer["next_state"].shape[2]), \
+            f"Next state shape mismatch: expected {(self.seq_len, self.buffer['next_state'].shape[2])}, got {next_state.shape}"
+        
+        assert next_state_trend.shape == (self.seq_len, self.buffer["next_state_trend"].shape[2]), \
+            f"Next state trend shape mismatch: expected {(self.seq_len, self.buffer['next_state_trend'].shape[2])}, got {next_state_trend.shape}"
+        
+        # Shape assertions for classification features
+        assert state_clf.shape == (2,), \
+            f"State clf shape mismatch: expected (2,), got {state_clf.shape}"
+        
+        assert next_state_clf.shape == (2,), \
+            f"Next state clf shape mismatch: expected (2,), got {next_state_clf.shape}"
+        
+        # Store all transition data
+        self.buffer["state"][self.count] = state
+        self.buffer["state_trend"][self.count] = state_trend
+        self.buffer["state_clf"][self.count] = state_clf
+        self.buffer["previous_action"][self.count] = previous_action
+        self.buffer["demo_action"][self.count] = demo_action
+        self.buffer["action"][self.count] = action
+        self.buffer["reward"][self.count] = reward
+        self.buffer["next_state"][self.count] = next_state
+        self.buffer["next_state_trend"][self.count] = next_state_trend
+        self.buffer["next_state_clf"][self.count] = next_state_clf
+        self.buffer["next_previous_action"][self.count] = next_previous_action
+        self.buffer["next_demo_action"][self.count] = next_demo_action
+        self.buffer["terminal"][self.count] = terminal
+        self.buffer["q_memory"][self.count] = q_memory
+        
+        self.count = (self.count + 1) % self.buffer_capacity
+        self.current_size = min(self.current_size + 1, self.buffer_capacity)
+
+    def sample(self):
+        if self.current_size < self.batch_size:
+            raise ValueError(f"Buffer size ({self.current_size}) < batch size ({self.batch_size})")
+        
+        index = np.random.randint(0, self.current_size, size=self.batch_size)
+        
+        batch = {}
+        for key in self.buffer.keys():
+            if key in ["action", "previous_action", "next_previous_action"]:
+                batch[key] = torch.tensor(self.buffer[key][index], dtype=torch.long)
+            else:
+                batch[key] = torch.tensor(self.buffer[key][index], dtype=torch.float32)
+        
+        return batch, None, None
+
+    def __len__(self):
+        """Return current buffer size"""
+        return self.current_size
+
+    def is_ready(self):
+        """Check if buffer has enough samples for training"""
+        return self.current_size >= self.batch_size
+
+    def get_statistics(self):
+        """Get buffer statistics for debugging/monitoring"""
+        if self.current_size == 0:
+            return {
+                "size": 0,
+                "capacity": self.buffer_capacity,
+                "utilization": 0.0
+            }
+        
+        return {
+            "size": self.current_size,
+            "capacity": self.buffer_capacity,
+            "utilization": self.current_size / self.buffer_capacity,
+            "avg_reward": np.mean(self.buffer["reward"][:self.current_size]),
+            "avg_q_memory": np.mean(self.buffer["q_memory"][:self.current_size]),
+            "terminal_ratio": np.mean(self.buffer["terminal"][:self.current_size])
+        }

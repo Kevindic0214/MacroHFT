@@ -6,10 +6,12 @@ from scipy.spatial.distance import cosine
 import numpy as np
 import pathlib
 import sys
-ROOT = str(pathlib.Path(__file__).resolve().parents[3])
-sys.path.append(ROOT)
-sys.path.insert(0, ".")
-from MacroHFT.model.net import *
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(ROOT))
+
+from model.net import *
+from model.multipatchformer import *
 
 
 def custom_kernel(h, hi):

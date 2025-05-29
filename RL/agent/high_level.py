@@ -13,20 +13,26 @@ from torch.utils.tensorboard import SummaryWriter
 import warnings
 warnings.filterwarnings("ignore")
 
-ROOT = str(pathlib.Path(__file__).resolve().parents[3])
-sys.path.append(ROOT)
-sys.path.insert(0, ".")
+# Get the path to the MacroHFT-main directory (parent of env directory)
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(ROOT))
 
-from MacroHFT.model.net import *
-from MacroHFT.env.high_level_env import Testing_Env, Training_Env
-from MacroHFT.RL.util.utili import get_ada, get_epsilon, LinearDecaySchedule
-from MacroHFT.RL.util.replay_buffer import ReplayBuffer_High
-from MacroHFT.RL.util.memory import episodicmemory
+from model.net import *
+from model.multipatchformer import *
+from env.high_level_env import Testing_Env, Training_Env
+from RL.util.utili import get_ada, get_epsilon, LinearDecaySchedule
+from RL.util.replay_buffer import ReplayBuffer_High, SequenceReplayBuffer_High
+from RL.util.memory import episodicmemory
 
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["F_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["OMP_NUM_THREADS"] = str(os.cpu_count())
+os.environ["MKL_NUM_THREADS"] = str(os.cpu_count())
+os.environ["OPENBLAS_NUM_THREADS"] = str(os.cpu_count())
+
+torch.set_num_threads(os.cpu_count())
+torch.set_num_interop_threads(os.cpu_count())
+
+print("PyTorch CPU threads:", torch.get_num_threads())
+print("PyTorch inter-op threads:", torch.get_num_interop_threads())
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--buffer_size",type=int,default=1000000,)
@@ -42,11 +48,11 @@ parser.add_argument("--update_times",type=int,default=10)
 parser.add_argument("--gamma", type=float, default=0.99)
 parser.add_argument("--tau", type=float, default=0.005)
 parser.add_argument("--transcation_cost",type=float,default=0.2 / 1000)
-parser.add_argument("--back_time_length",type=int,default=1)
+parser.add_argument("--back_time_length",type=int,default=20)
 parser.add_argument("--seed",type=int,default=12345)
 parser.add_argument("--n_step",type=int,default=1)
 parser.add_argument("--epoch_number",type=int,default=15)
-parser.add_argument("--device",type=str,default="cuda:0")
+parser.add_argument("--device",type=str,default="mps")
 parser.add_argument("--alpha",type=float,default=0.5)
 parser.add_argument("--beta",type=int,default=5)
 parser.add_argument("--exp",type=str,default="exp1")
@@ -55,32 +61,48 @@ parser.add_argument("--num_step",type=int,default=10)
 
 def seed_torch(seed):
     random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)  
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = True
-
+    
+    # Set seeds for CUDA if available
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+    
+    # Set seeds for MPS if available
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        # MPS doesn't have explicit seed setting like CUDA
+        # But we've set the global torch seed above
+        print("MPS available - setting MPS configuration")
 
 class DQN(object):
-    def __init__(self, args):  # 定义DQN的一系列属性
+    def __init__(self, args):  
         self.seed = args.seed
         seed_torch(self.seed)
-        if torch.cuda.is_available():
+
+        # Device selection logic with MPS support
+        if args.device == 'mps' and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = torch.device('mps')
+            print("Using MPS device for acceleration")
+        elif torch.cuda.is_available() and args.device.startswith('cuda'):
             self.device = torch.device(args.device)
+            print(f"Using CUDA device: {args.device}")
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = torch.device('mps')
+            print("Defaulting to MPS device for acceleration")
         else:
-            self.device = torch.device("cpu")
-        self.result_path = os.path.join("./result/high_level", '{}'.format(args.dataset), args.exp)
-        self.model_path = os.path.join(self.result_path,
-                                       "seed_{}".format(self.seed))
-        self.train_data_path = os.path.join(ROOT, "MacroHFT",
-                                        "data", args.dataset, "whole")
-        self.val_data_path = os.path.join(ROOT, "MacroHFT",
-                                        "data", args.dataset, "whole")
-        self.test_data_path = os.path.join(ROOT, "MacroHFT",
-                                        "data", args.dataset, "whole")
+            self.device = torch.device('cpu')
+            print("Using CPU (no GPU acceleration available)")
+        
+        print(f"Selected device: {self.device}")
+        self.result_path = os.path.join(ROOT, "result/high_level", args.dataset , args.exp)
+        self.model_path = os.path.join(self.result_path,"seed_{}".format(self.seed))
+        self.train_data_path = os.path.join(ROOT, "data", args.dataset, "whole")
+        self.val_data_path = os.path.join(ROOT, "data", args.dataset, "whole")
+        self.test_data_path = os.path.join(ROOT, "data", args.dataset, "whole")
         self.dataset=args.dataset
         self.num_step = args.num_step
         if "BTC" in self.dataset:
@@ -105,8 +127,8 @@ class DQN(object):
         if not os.path.exists(self.model_path):
             os.makedirs(self.model_path)
 
-        self.tech_indicator_list = np.load('./data/feature_list/single_features.npy', allow_pickle=True).tolist()
-        self.tech_indicator_list_trend = np.load('./data/feature_list/trend_features.npy', allow_pickle=True).tolist()
+        self.tech_indicator_list = np.load(ROOT / 'data/feature_list/single_features.npy', allow_pickle=True).tolist()
+        self.tech_indicator_list_trend = np.load(ROOT / 'data/feature_list/trend_features.npy', allow_pickle=True).tolist()
         self.clf_list = ['slope_360', 'vol_360']
 
         self.transcation_cost = args.transcation_cost
@@ -114,40 +136,34 @@ class DQN(object):
         self.n_action = 2
         self.n_state_1 = len(self.tech_indicator_list)
         self.n_state_2 = len(self.tech_indicator_list_trend)
-        self.slope_1 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
-        self.slope_2 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
-        self.slope_3 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
-        self.vol_1 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
-        self.vol_2 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
-        self.vol_3 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)        
-        model_list_slope = [
-            "./result/low_level/ETHUSDT/best_model/slope/1/best_model.pkl", 
-            "./result/low_level/ETHUSDT/best_model/slope/2/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/slope/3/best_model.pkl"
+        self.slope_1 = subagent_with_conv_patches(self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
+        self.slope_2 = subagent_with_conv_patches(self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
+        self.slope_3 = subagent_with_conv_patches(self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
+        self.vol_1 = subagent_with_conv_patches(self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
+        self.vol_2 = subagent_with_conv_patches(self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
+        self.vol_3 = subagent_with_conv_patches(self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)        
+        slope_relative_paths = [
+            "result/low_level/ETHUSDT/best_model/slope/1/best_model.pkl",
+            "result/low_level/ETHUSDT/best_model/slope/2/best_model.pkl",
+            "result/low_level/ETHUSDT/best_model/slope/3/best_model.pkl"
         ]
-        model_list_vol = [
-            "./result/low_level/ETHUSDT/best_model/vol/1/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/vol/2/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/vol/3/best_model.pkl"
+        
+        vol_relative_paths = [
+            "result/low_level/ETHUSDT/best_model/vol/1/best_model.pkl",
+            "result/low_level/ETHUSDT/best_model/vol/2/best_model.pkl",
+            "result/low_level/ETHUSDT/best_model/vol/3/best_model.pkl"
         ]
-        self.slope_1.load_state_dict(
-            torch.load(model_list_slope[0], map_location=self.device))
-        self.slope_2.load_state_dict(
-            torch.load(model_list_slope[1], map_location=self.device))
-        self.slope_3.load_state_dict(
-            torch.load(model_list_slope[2], map_location=self.device))
-        self.vol_1.load_state_dict(
-            torch.load(model_list_vol[0], map_location=self.device))
-        self.vol_2.load_state_dict(
-            torch.load(model_list_vol[1], map_location=self.device))
-        self.vol_3.load_state_dict(
-            torch.load(model_list_vol[2], map_location=self.device))
+        
+        # Combine root to the path
+        model_list_slope = [str(ROOT / path) for path in slope_relative_paths]
+        model_list_vol = [str(ROOT / path) for path in vol_relative_paths]
+
+        self.slope_1.load_state_dict(torch.load(model_list_slope[0], map_location=self.device))
+        self.slope_2.load_state_dict(torch.load(model_list_slope[1], map_location=self.device))
+        self.slope_3.load_state_dict(torch.load(model_list_slope[2], map_location=self.device))
+        self.vol_1.load_state_dict(torch.load(model_list_vol[0], map_location=self.device))
+        self.vol_2.load_state_dict(torch.load(model_list_vol[1], map_location=self.device))
+        self.vol_3.load_state_dict(torch.load(model_list_vol[2], map_location=self.device))
         self.slope_1.eval()
         self.slope_2.eval()
         self.slope_3.eval()
@@ -164,12 +180,11 @@ class DQN(object):
             1: self.vol_2,
             2: self.vol_3
         }
-        self.hyperagent = hyperagent(self.n_state_1, self.n_state_2, self.n_action, 32).to(self.device)
-        self.hyperagent_target = hyperagent(self.n_state_1, self.n_state_2, self.n_action, 32).to(self.device)
+        self.hyperagent = hyperagent_with_conv_patches(self.n_state_1, self.n_state_2, self.n_action, 32).to(self.device)
+        self.hyperagent_target = hyperagent_with_conv_patches(self.n_state_1, self.n_state_2, self.n_action, 32).to(self.device)
         self.hyperagent_target.load_state_dict(self.hyperagent.state_dict())
         self.update_times = args.update_times
-        self.optimizer = torch.optim.Adam(self.hyperagent.parameters(),
-                                          lr=args.lr)
+        self.optimizer = torch.optim.Adam(self.hyperagent.parameters(),lr=args.lr)
         self.loss_func = nn.MSELoss()
         self.batch_size = args.batch_size
         self.gamma = args.gamma
@@ -248,6 +263,10 @@ class DQN(object):
     def act(self, state, state_trend, state_clf, info):
         x1 = torch.FloatTensor(state).to(self.device)
         x2 = torch.FloatTensor(state_trend).to(self.device)
+        # for sequence data adjustment
+        x1 = x1.unsqueeze(0)
+        x2 = x2.unsqueeze(0)
+
         x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
         previous_action = torch.unsqueeze(
             torch.tensor(info["previous_action"]).long().to(self.device),
@@ -274,6 +293,10 @@ class DQN(object):
         with torch.no_grad():
             x1 = torch.FloatTensor(state).to(self.device)
             x2 = torch.FloatTensor(state_trend).to(self.device)
+            # for sequence data adjustment
+            x1 = x1.unsqueeze(0)
+            x2 = x2.unsqueeze(0)
+
             x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
             previous_action = torch.unsqueeze(
                 torch.tensor(info["previous_action"]).long().to(self.device),
@@ -295,6 +318,10 @@ class DQN(object):
     def q_estimate(self, state, state_trend, state_clf, info):
         x1 = torch.FloatTensor(state).to(self.device)
         x2 = torch.FloatTensor(state_trend).to(self.device)
+        # for sequence data adjustment
+        x1 = x1.unsqueeze(0)
+        x2 = x2.unsqueeze(0)
+
         x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
         previous_action = torch.unsqueeze(
             torch.tensor(info["previous_action"]).long().to(self.device),
@@ -316,6 +343,10 @@ class DQN(object):
     def calculate_hidden(self, state, state_trend, info):
         x1 = torch.FloatTensor(state).to(self.device)
         x2 = torch.FloatTensor(state_trend).to(self.device)
+        # for sequence data adjustment
+        x1 = x1.unsqueeze(0)
+        x2 = x2.unsqueeze(0)
+
         previous_action = torch.unsqueeze(
             torch.tensor(info["previous_action"]).long().to(self.device),
             0).to(self.device)
@@ -334,7 +365,7 @@ class DQN(object):
         epoch_counter = 0
         best_return_rate = -float('inf')
         best_model = None
-        self.replay_buffer = ReplayBuffer_High(args, self.n_state_1, self.n_state_2, self.n_action) 
+        self.replay_buffer = SequenceReplayBuffer_High(args, self.n_state_1, self.n_state_2, self.n_action) 
         for sample in range(self.epoch_number):
             print('epoch ', epoch_counter + 1)
             self.df = pd.read_feather(
@@ -474,10 +505,11 @@ class DQN(object):
             epoch_final_balance_train_list = []
             epoch_required_money_train_list = []
             epoch_reward_sum_train_list = []
-        best_model_path = os.path.join("./result/high_level", 
-                                        '{}'.format(self.dataset), 'best_model.pkl')
-        torch.save(best_model.state_dict(), best_model_path)
-        final_result_path = os.path.join("./result/high_level", '{}'.format(self.dataset))
+        best_model_path = os.path.join(ROOT, "result/high_level",self.dataset,self.clf,str(self.label),'best_model.pkl')
+        best_model_dir = os.path.dirname(best_model_path)
+        os.makedirs(best_model_dir, exist_ok=True)
+        torch.save(best_model, best_model_path)
+        final_result_path = os.path.join(ROOT, "result/high_level", '{}'.format(self.dataset))
         self.test_cluster(best_model_path, final_result_path)
 
 
