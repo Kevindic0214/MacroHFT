@@ -128,14 +128,14 @@ class DQN(object):
         self.vol_3 = subagent(
             self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)        
         model_list_slope = [
-            "./result/low_level/ETHUSDT/best_model/slope/1/best_model.pkl", 
-            "./result/low_level/ETHUSDT/best_model/slope/2/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/slope/3/best_model.pkl"
+            "./result/low_level/ETHUSDT/slope/0/label_3/seed_12345/best_model.pkl", 
+            "./result/low_level/ETHUSDT/slope/1/label_1/seed_12345/best_model.pkl",
+            "./result/low_level/ETHUSDT/slope/4/label_2/seed_12345/best_model.pkl"
         ]
         model_list_vol = [
-            "./result/low_level/ETHUSDT/best_model/vol/1/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/vol/2/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/vol/3/best_model.pkl"
+            "./result/low_level/ETHUSDT/vol/1/label_2/seed_12345/best_model.pkl",
+            "./result/low_level/ETHUSDT/vol/1/label_3/seed_12345/best_model.pkl",
+            "./result/low_level/ETHUSDT/vol/4/label_1/seed_12345/best_model.pkl"
         ]
         self.slope_1.load_state_dict(
             torch.load(model_list_slope[0], map_location=self.device))
