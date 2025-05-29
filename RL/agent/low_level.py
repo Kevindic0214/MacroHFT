@@ -493,14 +493,15 @@ class DQN(object):
             epoch_required_money_train_list = []
             epoch_reward_sum_train_list = []
         best_model_dir = os.path.join("./result/low_level", 
-                                    '{}'.format(self.dataset), '{}'.format(self.clf), str(self.label))
+                                    '{}'.format(self.dataset), '{}.{}'.format(self.clf, "C51"), str(float(args.alpha)), args.label, "seed_{}".format(self.seed))
 
         if not os.path.exists(best_model_dir):
             os.makedirs(best_model_dir)
 
         best_model_path = os.path.join(best_model_dir, 'best_model.pkl')
         torch.save(best_model, best_model_path)
-
+        print(f"Best model saved to: {best_model_path}")
+        print(f"Best validation return rate: {best_return_rate}")
 
     def val_cluster(self, epoch_path, save_path, initial_action):
         self.eval_net.load_state_dict(
