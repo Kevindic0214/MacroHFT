@@ -2,3 +2,6 @@ data/ETHUSDT
 logs/
 **/__pycache__/
 result/high_level
+result/**
+!result/low_level/ETHUSDT/best_model/
+!result/low_level/ETHUSDT/best_model/**
