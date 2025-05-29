@@ -30,37 +30,51 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["F_ENABLE_ONEDNN_OPTS"] = "0"
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--buffer_size",type=int,default=1000000,)
-parser.add_argument("--dataset",type=str,default="ETHUSDT")
-parser.add_argument("--q_value_memorize_freq",type=int, default=10,)
-parser.add_argument("--batch_size",type=int,default=512)
-parser.add_argument("--eval_update_freq",type=int,default=512)
+parser.add_argument(
+    "--buffer_size",
+    type=int,
+    default=1000000,
+)
+parser.add_argument("--dataset", type=str, default="ETHUSDT")
+parser.add_argument(
+    "--q_value_memorize_freq",
+    type=int,
+    default=10,
+)
+parser.add_argument("--batch_size", type=int, default=512)
+parser.add_argument("--eval_update_freq", type=int, default=512)
 parser.add_argument("--lr", type=float, default=1e-4)
-parser.add_argument("--epsilon_start",type=float,default=0.7)
-parser.add_argument("--epsilon_end",type=float,default=0.3)
-parser.add_argument("--decay_length",type=int,default=5)
-parser.add_argument("--update_times",type=int,default=10)
+parser.add_argument("--epsilon_start", type=float, default=0.7)
+parser.add_argument("--epsilon_end", type=float, default=0.3)
+parser.add_argument("--decay_length", type=int, default=5)
+parser.add_argument("--update_times", type=int, default=10)
 parser.add_argument("--gamma", type=float, default=0.99)
 parser.add_argument("--tau", type=float, default=0.005)
-parser.add_argument("--transcation_cost",type=float,default=0.2 / 1000)
-parser.add_argument("--back_time_length",type=int,default=1)
-parser.add_argument("--seed",type=int,default=12345)
-parser.add_argument("--n_step",type=int,default=1)
-parser.add_argument("--epoch_number",type=int,default=15)
-parser.add_argument("--device",type=str,default="cuda:0")
-parser.add_argument("--alpha",type=float,default=0.5)
-parser.add_argument("--beta",type=int,default=5)
-parser.add_argument("--exp",type=str,default="exp1")
-parser.add_argument("--num_step",type=int,default=10)
+parser.add_argument("--transcation_cost", type=float, default=0.2 / 1000)
+parser.add_argument("--back_time_length", type=int, default=1)
+parser.add_argument("--seed", type=int, default=12345)
+parser.add_argument("--n_step", type=int, default=1)
+parser.add_argument("--epoch_number", type=int, default=15)
+parser.add_argument("--device", type=str, default="cuda:0")
+parser.add_argument("--alpha", type=float, default=0.5)
+parser.add_argument("--beta", type=int, default=5)
+parser.add_argument("--exp", type=str, default="exp1")
+parser.add_argument("--num_step", type=int, default=10)
 # 新增動態混合相關參數
-parser.add_argument("--use_dynamic_mixing",type=bool,default=True, help="是否使用動態混合策略")
-parser.add_argument("--mixing_loss_weight",type=float,default=0.1, help="混合策略損失權重")
-parser.add_argument("--strategy_consistency_weight",type=float,default=0.05, help="策略一致性損失權重")
+parser.add_argument(
+    "--use_dynamic_mixing", type=bool, default=True, help="是否使用動態混合策略"
+)
+parser.add_argument(
+    "--mixing_loss_weight", type=float, default=0.1, help="混合策略損失權重"
+)
+parser.add_argument(
+    "--strategy_consistency_weight", type=float, default=0.05, help="策略一致性損失權重"
+)
 
 
 def seed_torch(seed):
     random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -77,35 +91,39 @@ class DQN(object):
             self.device = torch.device(args.device)
         else:
             self.device = torch.device("cpu")
-        self.result_path = os.path.join("./result/high_level", '{}'.format(args.dataset), args.exp)
-        self.model_path = os.path.join(self.result_path,
-                                       "seed_{}".format(self.seed))
-        self.train_data_path = os.path.join(ROOT, "MacroHFT",
-                                        "data", args.dataset, "whole")
-        self.val_data_path = os.path.join(ROOT, "MacroHFT",
-                                        "data", args.dataset, "whole")
-        self.test_data_path = os.path.join(ROOT, "MacroHFT",
-                                        "data", args.dataset, "whole")
-        self.dataset=args.dataset
+        self.result_path = os.path.join(
+            "./result/high_level", "{}".format(args.dataset), args.exp
+        )
+        self.model_path = os.path.join(self.result_path, "seed_{}".format(self.seed))
+        self.train_data_path = os.path.join(
+            ROOT, "MacroHFT", "data", args.dataset, "whole"
+        )
+        self.val_data_path = os.path.join(
+            ROOT, "MacroHFT", "data", args.dataset, "whole"
+        )
+        self.test_data_path = os.path.join(
+            ROOT, "MacroHFT", "data", args.dataset, "whole"
+        )
+        self.dataset = args.dataset
         self.num_step = args.num_step
-        
+
         # 新增動態混合相關屬性
         self.use_dynamic_mixing = args.use_dynamic_mixing
         self.mixing_loss_weight = args.mixing_loss_weight
         self.strategy_consistency_weight = args.strategy_consistency_weight
-        
+
         if "BTC" in self.dataset:
-            self.max_holding_number=0.01
+            self.max_holding_number = 0.01
         elif "ETH" in self.dataset:
-            self.max_holding_number=0.2
+            self.max_holding_number = 0.2
         elif "DOT" in self.dataset:
-            self.max_holding_number=10
+            self.max_holding_number = 10
         elif "LTC" in self.dataset:
-            self.max_holding_number=10
+            self.max_holding_number = 10
         else:
-            raise Exception ("we do not support other dataset yet")
+            raise Exception("we do not support other dataset yet")
         self.epoch_number = args.epoch_number
-        
+
         self.log_path = os.path.join(self.model_path, "log")
         if not os.path.exists(self.log_path):
             os.makedirs(self.log_path)
@@ -116,79 +134,90 @@ class DQN(object):
         if not os.path.exists(self.model_path):
             os.makedirs(self.model_path)
 
-        self.tech_indicator_list = np.load('./data/feature_list/single_features.npy', allow_pickle=True).tolist()
-        self.tech_indicator_list_trend = np.load('./data/feature_list/trend_features.npy', allow_pickle=True).tolist()
-        self.clf_list = ['slope_360', 'vol_360']
+        self.tech_indicator_list = np.load(
+            "./data/feature_list/single_features.npy", allow_pickle=True
+        ).tolist()
+        self.tech_indicator_list_trend = np.load(
+            "./data/feature_list/trend_features.npy", allow_pickle=True
+        ).tolist()
+        self.clf_list = ["slope_360", "vol_360"]
 
         self.transcation_cost = args.transcation_cost
         self.back_time_length = args.back_time_length
         self.n_action = 2
         self.n_state_1 = len(self.tech_indicator_list)
         self.n_state_2 = len(self.tech_indicator_list_trend)
-        
+
         # 初始化子代理
-        self.slope_1 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
-        self.slope_2 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
-        self.slope_3 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
-        self.vol_1 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
-        self.vol_2 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
-        self.vol_3 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)        
-            
+        self.slope_1 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64).to(
+            self.device
+        )
+        self.slope_2 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64).to(
+            self.device
+        )
+        self.slope_3 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64).to(
+            self.device
+        )
+        self.vol_1 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64).to(
+            self.device
+        )
+        self.vol_2 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64).to(
+            self.device
+        )
+        self.vol_3 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64).to(
+            self.device
+        )
+
         # 加載預訓練的子代理模型
         model_list_slope = [
-            "./result/low_level/ETHUSDT/best_model/slope/1/best_model.pkl", 
+            "./result/low_level/ETHUSDT/best_model/slope/1/best_model.pkl",
             "./result/low_level/ETHUSDT/best_model/slope/2/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/slope/3/best_model.pkl"
+            "./result/low_level/ETHUSDT/best_model/slope/3/best_model.pkl",
         ]
         model_list_vol = [
             "./result/low_level/ETHUSDT/best_model/vol/1/best_model.pkl",
             "./result/low_level/ETHUSDT/best_model/vol/2/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/vol/3/best_model.pkl"
+            "./result/low_level/ETHUSDT/best_model/vol/3/best_model.pkl",
         ]
         self.slope_1.load_state_dict(
-            torch.load(model_list_slope[0], map_location=self.device))
+            torch.load(model_list_slope[0], map_location=self.device)
+        )
         self.slope_2.load_state_dict(
-            torch.load(model_list_slope[1], map_location=self.device))
+            torch.load(model_list_slope[1], map_location=self.device)
+        )
         self.slope_3.load_state_dict(
-            torch.load(model_list_slope[2], map_location=self.device))
+            torch.load(model_list_slope[2], map_location=self.device)
+        )
         self.vol_1.load_state_dict(
-            torch.load(model_list_vol[0], map_location=self.device))
+            torch.load(model_list_vol[0], map_location=self.device)
+        )
         self.vol_2.load_state_dict(
-            torch.load(model_list_vol[1], map_location=self.device))
+            torch.load(model_list_vol[1], map_location=self.device)
+        )
         self.vol_3.load_state_dict(
-            torch.load(model_list_vol[2], map_location=self.device))
+            torch.load(model_list_vol[2], map_location=self.device)
+        )
         self.slope_1.eval()
         self.slope_2.eval()
         self.slope_3.eval()
         self.vol_1.eval()
         self.vol_2.eval()
         self.vol_3.eval()
-        
-        self.slope_agents = {
-            0: self.slope_1,
-            1: self.slope_2,
-            2: self.slope_3
-        }
-        self.vol_agents = {
-            0: self.vol_1,
-            1: self.vol_2,
-            2: self.vol_3
-        }
-        
+
+        self.slope_agents = {0: self.slope_1, 1: self.slope_2, 2: self.slope_3}
+        self.vol_agents = {0: self.vol_1, 1: self.vol_2, 2: self.vol_3}
+
         # 初始化超代理
-        self.hyperagent = hyperagent(self.n_state_1, self.n_state_2, self.n_action, 32).to(self.device)
-        self.hyperagent_target = hyperagent(self.n_state_1, self.n_state_2, self.n_action, 32).to(self.device)
+        self.hyperagent = hyperagent(
+            self.n_state_1, self.n_state_2, self.n_action, 32
+        ).to(self.device)
+        self.hyperagent_target = hyperagent(
+            self.n_state_1, self.n_state_2, self.n_action, 32
+        ).to(self.device)
         self.hyperagent_target.load_state_dict(self.hyperagent.state_dict())
-        
+
         self.update_times = args.update_times
-        self.optimizer = torch.optim.Adam(self.hyperagent.parameters(),
-                                          lr=args.lr)
+        self.optimizer = torch.optim.Adam(self.hyperagent.parameters(), lr=args.lr)
         self.loss_func = nn.MSELoss()
         self.batch_size = args.batch_size
         self.gamma = args.gamma
@@ -199,9 +228,15 @@ class DQN(object):
         self.epsilon_start = args.epsilon_start
         self.epsilon_end = args.epsilon_end
         self.decay_length = args.decay_length
-        self.epsilon_scheduler = LinearDecaySchedule(start_epsilon=self.epsilon_start, end_epsilon=self.epsilon_end, decay_length=self.decay_length)
+        self.epsilon_scheduler = LinearDecaySchedule(
+            start_epsilon=self.epsilon_start,
+            end_epsilon=self.epsilon_end,
+            decay_length=self.decay_length,
+        )
         self.epsilon = args.epsilon_start
-        self.memory = episodicmemory(4320, 5, self.n_state_1, self.n_state_2, 64, self.device)
+        self.memory = episodicmemory(
+            4320, 5, self.n_state_1, self.n_state_2, 64, self.device
+        )
 
     def calculate_q(self, w, qs):
         """計算加權Q值（兼容動態混合策略）"""
@@ -209,7 +244,7 @@ class DQN(object):
         q_tensor = q_tensor.permute(1, 0, 2)
         weights_reshaped = w.view(-1, 1, 6)
         combined_q = torch.bmm(weights_reshaped, q_tensor).squeeze(1)
-        
+
         return combined_q
 
     def get_agent_outputs(self, state, state_trend, previous_action):
@@ -220,55 +255,90 @@ class DQN(object):
             self.slope_agents[2](state, state_trend, previous_action),
             self.vol_agents[0](state, state_trend, previous_action),
             self.vol_agents[1](state, state_trend, previous_action),
-            self.vol_agents[2](state, state_trend, previous_action)
+            self.vol_agents[2](state, state_trend, previous_action),
         ]
         return qs
 
     def update(self, replay_buffer):
         batch, _, _ = replay_buffer.sample()
         batch = {k: v.to(self.device) for k, v in batch.items()}
-        
+
         if self.use_dynamic_mixing:
             # 動態混合策略的更新
             hyperagent_output = self.hyperagent(
-                batch['state'], batch['state_trend'], batch['state_clf'], 
-                batch['previous_action'], use_dynamic_mixing=True
+                batch["state"],
+                batch["state_trend"],
+                batch["state_clf"],
+                batch["previous_action"],
+                use_dynamic_mixing=True,
             )
             w_current, mixing_weights, soft_weights, hard_weights = hyperagent_output
-            
+
             hyperagent_target_output = self.hyperagent_target(
-                batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], 
-                batch['next_previous_action'], use_dynamic_mixing=True
+                batch["next_state"],
+                batch["next_state_trend"],
+                batch["next_state_clf"],
+                batch["next_previous_action"],
+                use_dynamic_mixing=True,
             )
             w_next, _, _, _ = hyperagent_target_output
-            
+
             hyperagent_eval_output = self.hyperagent(
-                batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], 
-                batch['next_previous_action'], use_dynamic_mixing=True
+                batch["next_state"],
+                batch["next_state_trend"],
+                batch["next_state_clf"],
+                batch["next_previous_action"],
+                use_dynamic_mixing=True,
             )
             w_next_, _, _, _ = hyperagent_eval_output
         else:
             # 傳統軟混合策略
-            w_current = self.hyperagent(batch['state'], batch['state_trend'], batch['state_clf'], batch['previous_action'], use_dynamic_mixing=False)
-            w_next = self.hyperagent_target(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'], use_dynamic_mixing=False)
-            w_next_ = self.hyperagent(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'], use_dynamic_mixing=False)
+            w_current = self.hyperagent(
+                batch["state"],
+                batch["state_trend"],
+                batch["state_clf"],
+                batch["previous_action"],
+                use_dynamic_mixing=False,
+            )
+            w_next = self.hyperagent_target(
+                batch["next_state"],
+                batch["next_state_trend"],
+                batch["next_state_clf"],
+                batch["next_previous_action"],
+                use_dynamic_mixing=False,
+            )
+            w_next_ = self.hyperagent(
+                batch["next_state"],
+                batch["next_state_trend"],
+                batch["next_state_clf"],
+                batch["next_previous_action"],
+                use_dynamic_mixing=False,
+            )
 
         # 獲取所有子代理的Q值
-        qs_current = self.get_agent_outputs(batch['state'], batch['state_trend'], batch['previous_action'])
-        qs_next = self.get_agent_outputs(batch['next_state'], batch['next_state_trend'], batch['next_previous_action'])
-        
+        qs_current = self.get_agent_outputs(
+            batch["state"], batch["state_trend"], batch["previous_action"]
+        )
+        qs_next = self.get_agent_outputs(
+            batch["next_state"],
+            batch["next_state_trend"],
+            batch["next_previous_action"],
+        )
+
         # 計算組合Q值
         q_distribution = self.calculate_q(w_current, qs_current)
-        q_current = q_distribution.gather(-1, batch['action']).squeeze(-1)
+        q_current = q_distribution.gather(-1, batch["action"]).squeeze(-1)
         a_argmax = self.calculate_q(w_next_, qs_next).argmax(dim=-1, keepdim=True)
         q_nexts = self.calculate_q(w_next, qs_next)
-        q_target = batch['reward'] + self.gamma * (1 - batch['terminal']) * q_nexts.gather(-1, a_argmax).squeeze(-1)
+        q_target = batch["reward"] + self.gamma * (
+            1 - batch["terminal"]
+        ) * q_nexts.gather(-1, a_argmax).squeeze(-1)
 
         # 基礎損失
         td_error = self.loss_func(q_current, q_target)
-        memory_error = self.loss_func(q_current, batch['q_memory'])
+        memory_error = self.loss_func(q_current, batch["q_memory"])
 
-        demonstration = batch['demo_action']
+        demonstration = batch["demo_action"]
         KL_loss = F.kl_div(
             (q_distribution.softmax(dim=-1) + 1e-8).log(),
             (demonstration.softmax(dim=-1) + 1e-8),
@@ -277,73 +347,96 @@ class DQN(object):
 
         # 總損失
         loss = td_error + args.alpha * memory_error + args.beta * KL_loss
-        
+
         # 動態混合策略的額外損失
         if self.use_dynamic_mixing:
             # 混合權重的正則化損失（鼓勵明確的策略選擇）
             mixing_regularization = -torch.mean(
-                mixing_weights * torch.log(mixing_weights + 1e-8) + 
-                (1 - mixing_weights) * torch.log(1 - mixing_weights + 1e-8)
+                mixing_weights * torch.log(mixing_weights + 1e-8)
+                + (1 - mixing_weights) * torch.log(1 - mixing_weights + 1e-8)
             )
-            
+
             # 策略一致性損失（減少頻繁切換）
-            if hasattr(self, 'prev_mixing_weights'):
-                consistency_loss = torch.mean(torch.abs(mixing_weights - self.prev_mixing_weights))
+            if hasattr(self, "prev_mixing_weights"):
+                consistency_loss = torch.mean(
+                    torch.abs(mixing_weights - self.prev_mixing_weights)
+                )
             else:
                 consistency_loss = torch.tensor(0.0).to(self.device)
             self.prev_mixing_weights = mixing_weights.detach()
-            
+
             # 軟硬權重差異損失（鼓勵明確區分）
-            weight_diff_loss = -torch.mean(torch.sum(torch.abs(soft_weights - hard_weights), dim=-1))
-            
-            loss += (self.mixing_loss_weight * mixing_regularization + 
-                    self.strategy_consistency_weight * consistency_loss +
-                    0.01 * weight_diff_loss)
+            weight_diff_loss = -torch.mean(
+                torch.sum(torch.abs(soft_weights - hard_weights), dim=-1)
+            )
+
+            loss += (
+                self.mixing_loss_weight * mixing_regularization
+                + self.strategy_consistency_weight * consistency_loss
+                + 0.01 * weight_diff_loss
+            )
 
         self.optimizer.zero_grad()
         loss.backward()
 
         torch.nn.utils.clip_grad_norm_(self.hyperagent.parameters(), 1)
         self.optimizer.step()
-        
+
         # 軟更新目標網絡
-        for param, target_param in zip(self.hyperagent.parameters(), self.hyperagent_target.parameters()):
-            target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+        for param, target_param in zip(
+            self.hyperagent.parameters(), self.hyperagent_target.parameters()
+        ):
+            target_param.data.copy_(
+                self.tau * param.data + (1 - self.tau) * target_param.data
+            )
         self.update_counter += 1
-        
+
         # 返回損失信息
         if self.use_dynamic_mixing:
-            return (td_error.cpu(), memory_error.cpu(), KL_loss.cpu(), 
-                   torch.mean(q_current.cpu()), torch.mean(q_target.cpu()),
-                   torch.mean(mixing_weights.cpu()), mixing_regularization.cpu())
+            return (
+                td_error.cpu(),
+                memory_error.cpu(),
+                KL_loss.cpu(),
+                torch.mean(q_current.cpu()),
+                torch.mean(q_target.cpu()),
+                torch.mean(mixing_weights.cpu()),
+                mixing_regularization.cpu(),
+            )
         else:
-            return (td_error.cpu(), memory_error.cpu(), KL_loss.cpu(), 
-                   torch.mean(q_current.cpu()), torch.mean(q_target.cpu()))
+            return (
+                td_error.cpu(),
+                memory_error.cpu(),
+                KL_loss.cpu(),
+                torch.mean(q_current.cpu()),
+                torch.mean(q_target.cpu()),
+            )
 
     def act(self, state, state_trend, state_clf, info):
         x1 = torch.FloatTensor(state).to(self.device)
         x2 = torch.FloatTensor(state_trend).to(self.device)
         x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
         previous_action = torch.unsqueeze(
-            torch.tensor(info["previous_action"]).long().to(self.device),
-            0).to(self.device)
-            
-        if np.random.uniform() < (1-self.epsilon):
+            torch.tensor(info["previous_action"]).long().to(self.device), 0
+        ).to(self.device)
+
+        if np.random.uniform() < (1 - self.epsilon):
             qs = self.get_agent_outputs(x1, x2, previous_action)
-            
+
             if self.use_dynamic_mixing:
                 hyperagent_output = self.hyperagent(
                     x1, x2, x3, previous_action, use_dynamic_mixing=True
                 )
                 w, _, _, _ = hyperagent_output
             else:
-                w = self.hyperagent(x1, x2, x3, previous_action, use_dynamic_mixing=False)
-                
+                w = self.hyperagent(
+                    x1, x2, x3, previous_action, use_dynamic_mixing=False
+                )
+
             actions_value = self.calculate_q(w, qs)
             action = torch.max(actions_value, 1)[1].data.cpu().numpy()
             action = action[0]
         else:
-            action_choice = [0,1]
+            action_choice = [0, 1]
             action = random.choice(action_choice)
         return action
 
@@ -353,19 +446,21 @@ class DQN(object):
             x2 = torch.FloatTensor(state_trend).to(self.device)
             x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
             previous_action = torch.unsqueeze(
-                torch.tensor(info["previous_action"]).long().to(self.device),
-                0).to(self.device)
-                
+                torch.tensor(info["previous_action"]).long().to(self.device), 0
+            ).to(self.device)
+
             qs = self.get_agent_outputs(x1, x2, previous_action)
-            
+
             if self.use_dynamic_mixing:
                 hyperagent_output = self.hyperagent(
                     x1, x2, x3, previous_action, use_dynamic_mixing=True
                 )
                 w, _, _, _ = hyperagent_output
             else:
-                w = self.hyperagent(x1, x2, x3, previous_action, use_dynamic_mixing=False)
-                
+                w = self.hyperagent(
+                    x1, x2, x3, previous_action, use_dynamic_mixing=False
+                )
+
             actions_value = self.calculate_q(w, qs)
             action = torch.max(actions_value, 1)[1].data.cpu().numpy()
             action = action[0]
@@ -376,11 +471,11 @@ class DQN(object):
         x2 = torch.FloatTensor(state_trend).to(self.device)
         x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
         previous_action = torch.unsqueeze(
-            torch.tensor(info["previous_action"]).long().to(self.device),
-            0).to(self.device)
-            
+            torch.tensor(info["previous_action"]).long().to(self.device), 0
+        ).to(self.device)
+
         qs = self.get_agent_outputs(x1, x2, previous_action)
-        
+
         if self.use_dynamic_mixing:
             hyperagent_output = self.hyperagent(
                 x1, x2, x3, previous_action, use_dynamic_mixing=True
@@ -388,18 +483,18 @@ class DQN(object):
             w, _, _, _ = hyperagent_output
         else:
             w = self.hyperagent(x1, x2, x3, previous_action, use_dynamic_mixing=False)
-            
+
         actions_value = self.calculate_q(w, qs)
         q = torch.max(actions_value, 1)[0].detach().cpu().numpy()
-        
+
         return q
 
     def calculate_hidden(self, state, state_trend, info):
         x1 = torch.FloatTensor(state).to(self.device)
         x2 = torch.FloatTensor(state_trend).to(self.device)
         previous_action = torch.unsqueeze(
-            torch.tensor(info["previous_action"]).long().to(self.device),
-            0).to(self.device)
+            torch.tensor(info["previous_action"]).long().to(self.device), 0
+        ).to(self.device)
         with torch.no_grad():
             hs = self.hyperagent.encode(x1, x2, previous_action).cpu().numpy()
         return hs
@@ -412,28 +507,32 @@ class DQN(object):
         step_counter = 0
         episode_counter = 0
         epoch_counter = 0
-        best_return_rate = -float('inf')
+        best_return_rate = -float("inf")
         best_model = None
-        self.replay_buffer = ReplayBuffer_High(args, self.n_state_1, self.n_state_2, self.n_action) 
-        
+        self.replay_buffer = ReplayBuffer_High(
+            args, self.n_state_1, self.n_state_2, self.n_action
+        )
+
         for sample in range(self.epoch_number):
-            print('epoch ', epoch_counter + 1)
+            print("epoch ", epoch_counter + 1)
             self.df = pd.read_feather(
-                os.path.join(self.train_data_path, "train.feather"))
-            
+                os.path.join(self.train_data_path, "train.feather")
+            )
+
             train_env = Training_Env(
-                    df=self.df,
-                    tech_indicator_list=self.tech_indicator_list,
-                    tech_indicator_list_trend=self.tech_indicator_list_trend,
-                    clf_list=self.clf_list,
-                    transcation_cost=self.transcation_cost,
-                    back_time_length=self.back_time_length,
-                    max_holding_number=self.max_holding_number,
-                    initial_action=random.choices(range(self.n_action), k=1)[0],
-                    alpha = 0)
+                df=self.df,
+                tech_indicator_list=self.tech_indicator_list,
+                tech_indicator_list_trend=self.tech_indicator_list_trend,
+                clf_list=self.clf_list,
+                transcation_cost=self.transcation_cost,
+                back_time_length=self.back_time_length,
+                max_holding_number=self.max_holding_number,
+                initial_action=random.choices(range(self.n_action), k=1)[0],
+                alpha=0,
+            )
             s, s2, s3, info = train_env.reset()
             episode_reward_sum = 0
-            
+
             while True:
                 a = self.act(s, s2, s3, info)
                 s_, s2_, s3_, r, done, info_ = train_env.step(a)
@@ -442,62 +541,94 @@ class DQN(object):
                 q_memory = self.memory.query(hs, a)
                 if np.isnan(q_memory):
                     q_memory = q
-                self.replay_buffer.store_transition(s, s2, s3, info['previous_action'], info['q_value'], a, r, s_, s2_, s3_, info_['previous_action'],
-                                info_['q_value'], done, q_memory)
-                self.memory.add(hs, a, q, s, s2, info['previous_action'])
+                self.replay_buffer.store_transition(
+                    s,
+                    s2,
+                    s3,
+                    info["previous_action"],
+                    info["q_value"],
+                    a,
+                    r,
+                    s_,
+                    s2_,
+                    s3_,
+                    info_["previous_action"],
+                    info_["q_value"],
+                    done,
+                    q_memory,
+                )
+                self.memory.add(hs, a, q, s, s2, info["previous_action"])
                 episode_reward_sum += r
 
                 s, s2, s3, info = s_, s2_, s3_, info_
                 step_counter += 1
-                
+
                 if step_counter % self.eval_update_freq == 0 and step_counter > (
-                        self.batch_size + self.n_step):
+                    self.batch_size + self.n_step
+                ):
                     for i in range(self.update_times):
                         if self.use_dynamic_mixing:
-                            td_error, memory_error, KL_loss, q_eval, q_target, avg_mixing_weight, mixing_reg = self.update(self.replay_buffer)
+                            (
+                                td_error,
+                                memory_error,
+                                KL_loss,
+                                q_eval,
+                                q_target,
+                                avg_mixing_weight,
+                                mixing_reg,
+                            ) = self.update(self.replay_buffer)
                         else:
-                            td_error, memory_error, KL_loss, q_eval, q_target = self.update(self.replay_buffer)
-                            
+                            td_error, memory_error, KL_loss, q_eval, q_target = (
+                                self.update(self.replay_buffer)
+                            )
+
                         if self.update_counter % self.q_value_memorize_freq == 1:
                             self.writer.add_scalar(
                                 tag="td_error",
                                 scalar_value=td_error,
                                 global_step=self.update_counter,
-                                walltime=None)
+                                walltime=None,
+                            )
                             self.writer.add_scalar(
                                 tag="memory_error",
                                 scalar_value=memory_error,
                                 global_step=self.update_counter,
-                                walltime=None)
+                                walltime=None,
+                            )
                             self.writer.add_scalar(
                                 tag="KL_loss",
                                 scalar_value=KL_loss,
                                 global_step=self.update_counter,
-                                walltime=None)
+                                walltime=None,
+                            )
                             self.writer.add_scalar(
                                 tag="q_eval",
                                 scalar_value=q_eval,
                                 global_step=self.update_counter,
-                                walltime=None)
+                                walltime=None,
+                            )
                             self.writer.add_scalar(
                                 tag="q_target",
                                 scalar_value=q_target,
                                 global_step=self.update_counter,
-                                walltime=None)
-                            
+                                walltime=None,
+                            )
+
                             # 動態混合策略的額外日誌
                             if self.use_dynamic_mixing:
                                 self.writer.add_scalar(
                                     tag="avg_mixing_weight",
                                     scalar_value=avg_mixing_weight,
                                     global_step=self.update_counter,
-                                    walltime=None)
+                                    walltime=None,
+                                )
                                 self.writer.add_scalar(
                                     tag="mixing_regularization",
                                     scalar_value=mixing_reg,
                                     global_step=self.update_counter,
-                                    walltime=None)
-                                
+                                    walltime=None,
+                                )
+
                                 # 記錄策略統計信息
                                 strategy_stats = self.hyperagent.get_strategy_stats()
                                 for key, value in strategy_stats.items():
@@ -505,31 +636,43 @@ class DQN(object):
                                         tag=f"strategy_{key}",
                                         scalar_value=value,
                                         global_step=self.update_counter,
-                                        walltime=None)
-                    
+                                        walltime=None,
+                                    )
+
                     if step_counter > 4320:
                         self.memory.re_encode(self.hyperagent)
                 if done:
                     break
-                    
+
             episode_counter += 1
-            final_balance, required_money = train_env.final_balance, train_env.required_money
-            self.writer.add_scalar(tag="return_rate_train",
-                                scalar_value=final_balance / (required_money),
-                                global_step=episode_counter,
-                                walltime=None)
-            self.writer.add_scalar(tag="final_balance_train",
-                                scalar_value=final_balance,
-                                global_step=episode_counter,
-                                walltime=None)
-            self.writer.add_scalar(tag="required_money_train",
-                                scalar_value=required_money,
-                                global_step=episode_counter,
-                                walltime=None)
-            self.writer.add_scalar(tag="reward_sum_train",
-                                scalar_value=episode_reward_sum,
-                                global_step=episode_counter,
-                                walltime=None)
+            final_balance, required_money = (
+                train_env.final_balance,
+                train_env.required_money,
+            )
+            self.writer.add_scalar(
+                tag="return_rate_train",
+                scalar_value=final_balance / (required_money),
+                global_step=episode_counter,
+                walltime=None,
+            )
+            self.writer.add_scalar(
+                tag="final_balance_train",
+                scalar_value=final_balance,
+                global_step=episode_counter,
+                walltime=None,
+            )
+            self.writer.add_scalar(
+                tag="required_money_train",
+                scalar_value=required_money,
+                global_step=episode_counter,
+                walltime=None,
+            )
+            self.writer.add_scalar(
+                tag="reward_sum_train",
+                scalar_value=episode_reward_sum,
+                global_step=episode_counter,
+                walltime=None,
+            )
             epoch_return_rate_train_list.append(final_balance / (required_money))
             epoch_final_balance_train_list.append(final_balance)
             epoch_required_money_train_list.append(required_money)
@@ -541,41 +684,42 @@ class DQN(object):
             mean_final_balance_train = np.mean(epoch_final_balance_train_list)
             mean_required_money_train = np.mean(epoch_required_money_train_list)
             mean_reward_sum_train = np.mean(epoch_reward_sum_train_list)
-            
+
             self.writer.add_scalar(
-                    tag="epoch_return_rate_train",
-                    scalar_value=mean_return_rate_train,
-                    global_step=epoch_counter,
-                    walltime=None,
-                )
+                tag="epoch_return_rate_train",
+                scalar_value=mean_return_rate_train,
+                global_step=epoch_counter,
+                walltime=None,
+            )
             self.writer.add_scalar(
                 tag="epoch_final_balance_train",
                 scalar_value=mean_final_balance_train,
                 global_step=epoch_counter,
                 walltime=None,
-                )
+            )
             self.writer.add_scalar(
                 tag="epoch_required_money_train",
                 scalar_value=mean_required_money_train,
                 global_step=epoch_counter,
                 walltime=None,
-                )
+            )
             self.writer.add_scalar(
                 tag="epoch_reward_sum_train",
                 scalar_value=mean_reward_sum_train,
                 global_step=epoch_counter,
                 walltime=None,
-                )
-                
-            epoch_path = os.path.join(self.model_path,
-                                        "epoch_{}".format(epoch_counter))
+            )
+
+            epoch_path = os.path.join(self.model_path, "epoch_{}".format(epoch_counter))
             if not os.path.exists(epoch_path):
                 os.makedirs(epoch_path)
-            torch.save(self.hyperagent.state_dict(),
-                        os.path.join(epoch_path, "trained_model.pkl"))  
+            torch.save(
+                self.hyperagent.state_dict(),
+                os.path.join(epoch_path, "trained_model.pkl"),
+            )
             val_path = os.path.join(epoch_path, "val")
             if not os.path.exists(val_path):
-                    os.makedirs(val_path)
+                os.makedirs(val_path)
             return_rate_eval = self.val_cluster(epoch_path, val_path)
             if return_rate_eval > best_return_rate:
                 best_return_rate = return_rate_eval
@@ -584,35 +728,40 @@ class DQN(object):
             epoch_final_balance_train_list = []
             epoch_required_money_train_list = []
             epoch_reward_sum_train_list = []
-            
-        best_model_path = os.path.join("./result/high_level", 
-                                        '{}'.format(self.dataset), 'best_model.pkl')
+
+        # Save the best model to a path unique to the experiment
+        best_model_path = os.path.join(self.model_path, "best_model.pkl")
         torch.save(best_model, best_model_path)
-        final_result_path = os.path.join("./result/high_level", '{}'.format(self.dataset))
+
+        # Define a unique path for test results for this experiment and ensure it exists
+        final_result_path = os.path.join(self.model_path, "test_results")
+        os.makedirs(final_result_path, exist_ok=True)
+
         self.test_cluster(best_model_path, final_result_path)
 
     def val_cluster(self, model_path, save_path):
         self.hyperagent.load_state_dict(
-            torch.load(os.path.join(model_path, "trained_model.pkl")))
+            torch.load(os.path.join(model_path, "trained_model.pkl"))
+        )
         self.hyperagent.eval()
-        counter = False
+        # counter = False # Unused variable
         action_list = []
         reward_list = []
         final_balance_list = []
         required_money_list = []
         commission_fee_list = []
-        self.df = pd.read_feather(
-            os.path.join(self.val_data_path, "val.feather"))
-        
+        self.df = pd.read_feather(os.path.join(self.val_data_path, "val.feather"))
+
         val_env = Testing_Env(
-                df=self.df,
-                tech_indicator_list=self.tech_indicator_list,
-                tech_indicator_list_trend=self.tech_indicator_list_trend,
-                clf_list=self.clf_list,
-                transcation_cost=self.transcation_cost,
-                back_time_length=self.back_time_length,
-                max_holding_number=self.max_holding_number,
-                initial_action=0)
+            df=self.df,
+            tech_indicator_list=self.tech_indicator_list,
+            tech_indicator_list_trend=self.tech_indicator_list_trend,
+            clf_list=self.clf_list,
+            transcation_cost=self.transcation_cost,
+            back_time_length=self.back_time_length,
+            max_holding_number=self.max_holding_number,
+            initial_action=0,
+        )
         s, s2, s3, info = val_env.reset()
         done = False
         action_list_episode = []
@@ -623,8 +772,9 @@ class DQN(object):
             reward_list_episode.append(r)
             s, s2, s3, info = s_, s2_, s3_, info_
             action_list_episode.append(a)
-        portfit_magine, final_balance, required_money, commission_fee = val_env.get_final_return_rate(
-            slient=True)
+        portfit_magine, final_balance, required_money, commission_fee = (
+            val_env.get_final_return_rate(slient=True)
+        )
         final_balance = val_env.final_balance
         action_list.append(action_list_episode)
         reward_list.append(reward_list_episode)
@@ -638,37 +788,36 @@ class DQN(object):
         commission_fee_list = np.array(commission_fee_list)
         np.save(os.path.join(save_path, "action_val.npy"), action_list)
         np.save(os.path.join(save_path, "reward_val.npy"), reward_list)
-        np.save(os.path.join(save_path, "final_balance_val.npy"),
-            final_balance_list)
-        np.save(os.path.join(save_path, "require_money_val.npy"),
-                required_money_list)
-        np.save(os.path.join(save_path, "commission_fee_history_val.npy"),
-                commission_fee_list)
+        np.save(os.path.join(save_path, "final_balance_val.npy"), final_balance_list)
+        np.save(os.path.join(save_path, "require_money_val.npy"), required_money_list)
+        np.save(
+            os.path.join(save_path, "commission_fee_history_val.npy"),
+            commission_fee_list,
+        )
         return_rate = final_balance / required_money
         return return_rate
 
     def test_cluster(self, model_path, save_path):
-        self.hyperagent.load_state_dict(
-            torch.load(model_path))
+        self.hyperagent.load_state_dict(torch.load(model_path))
         self.hyperagent.eval()
-        counter = False
+        # counter = False # Unused variable
         action_list = []
         reward_list = []
         final_balance_list = []
         required_money_list = []
         commission_fee_list = []
-        self.df = pd.read_feather(
-            os.path.join(self.test_data_path, "test.feather"))
-        
+        self.df = pd.read_feather(os.path.join(self.test_data_path, "test.feather"))
+
         test_env = Testing_Env(
-                df=self.df,
-                tech_indicator_list=self.tech_indicator_list,
-                tech_indicator_list_trend=self.tech_indicator_list_trend,
-                clf_list=self.clf_list,
-                transcation_cost=self.transcation_cost,
-                back_time_length=self.back_time_length,
-                max_holding_number=self.max_holding_number,
-                initial_action=0)
+            df=self.df,
+            tech_indicator_list=self.tech_indicator_list,
+            tech_indicator_list_trend=self.tech_indicator_list_trend,
+            clf_list=self.clf_list,
+            transcation_cost=self.transcation_cost,
+            back_time_length=self.back_time_length,
+            max_holding_number=self.max_holding_number,
+            initial_action=0,
+        )
         s, s2, s3, info = test_env.reset()
         done = False
         action_list_episode = []
@@ -679,8 +828,9 @@ class DQN(object):
             reward_list_episode.append(r)
             s, s2, s3, info = s_, s2_, s3_, info_
             action_list_episode.append(a)
-        portfit_magine, final_balance, required_money, commission_fee = test_env.get_final_return_rate(
-            slient=True)
+        portfit_magine, final_balance, required_money, commission_fee = (
+            test_env.get_final_return_rate(slient=True)
+        )
         final_balance = test_env.final_balance
         action_list.append(action_list_episode)
         reward_list.append(reward_list_episode)
@@ -695,13 +845,13 @@ class DQN(object):
         commission_fee_list = np.array(commission_fee_list)
         np.save(os.path.join(save_path, "action.npy"), action_list)
         np.save(os.path.join(save_path, "reward.npy"), reward_list)
-        np.save(os.path.join(save_path, "final_balance.npy"),
-            final_balance_list)
-        np.save(os.path.join(save_path, "require_money.npy"),
-                required_money_list)
-        np.save(os.path.join(save_path, "commission_fee_history.npy"),
-                commission_fee_list)
-            
+        np.save(os.path.join(save_path, "final_balance.npy"), final_balance_list)
+        np.save(os.path.join(save_path, "require_money.npy"), required_money_list)
+        np.save(
+            os.path.join(save_path, "commission_fee_history.npy"), commission_fee_list
+        )
+
+
 if __name__ == "__main__":
     args = parser.parse_args()
     print(args)
