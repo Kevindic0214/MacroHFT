@@ -83,7 +83,7 @@ class Testing_Env(gym.Env):
         self.data = self.df.iloc[self.m - self.stack_length:self.m]
         self.single_state = self.data[self.tech_indicator_list].values
         self.trend_state = self.data[self.tech_indicator_list_trend].values
-        self.clf_state = self.data[self.clf_list].values
+        self.clf_state = self.data.iloc[-1][self.clf_list]
         self.initial_reward = 0
         self.reward_history = [self.initial_reward]
         self.previous_action = 0
@@ -94,7 +94,7 @@ class Testing_Env(gym.Env):
         self.comission_fee_history = []
         self.previous_position = self.initial_action * self.max_holding_number
         self.position = self.initial_action * self.max_holding_number
-        return self.single_state, self.trend_state, self.clf_state.reshape(-1), {
+        return self.single_state, self.trend_state, self.clf_state, {
             "previous_action": self.initial_action,
         }
 
@@ -109,7 +109,7 @@ class Testing_Env(gym.Env):
         current_price_information = self.data.iloc[-1]
         self.single_state = self.data[self.tech_indicator_list].values
         self.trend_state = self.data[self.tech_indicator_list_trend].values
-        self.clf_state = self.data[self.clf_list].values
+        self.clf_state = self.data.iloc[-1][self.clf_list]
         self.previous_position = previous_position
         self.position = position
         self.changing = (self.position != self.previous_position)
@@ -166,7 +166,7 @@ class Testing_Env(gym.Env):
             print("the portfit margine is ",
                   self.final_balance / self.required_money)
 
-        return self.single_state, self.trend_state, self.clf_state.reshape(-1), self.reward, self.terminal, {
+        return self.single_state, self.trend_state, self.clf_state, self.reward, self.terminal, {
             "previous_action": action,
         }
 
@@ -215,11 +215,11 @@ class Training_Env(Testing_Env):
         self.previous_position = self.initial_action * self.max_holding_number
         self.position = self.initial_action * self.max_holding_number
         info['q_value'] = self.q_table[self.m - 1][self.previous_action][:]
-        return single_state, trend_state, clf_state.reshape(-1), info
+        return single_state, trend_state, clf_state, info
 
     def step(self, action):
         single_state, trend_state, clf_state, reward, done, info = super(Training_Env, self).step(action)
         info['q_value'] = self.q_table[self.m - 1][action][:]
-        return single_state, trend_state, clf_state.reshape(-1), reward, done, info
+        return single_state, trend_state, clf_state, reward, done, info
 
 

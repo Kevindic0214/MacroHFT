@@ -22,7 +22,7 @@ from model.multipatchformer import *
 from env.high_level_env import Testing_Env, Training_Env
 from RL.util.utili import get_ada, get_epsilon, LinearDecaySchedule
 from RL.util.replay_buffer import ReplayBuffer_High, SequenceReplayBuffer_High
-from RL.util.memory import episodicmemory
+from RL.util.memory import episodicmemory, SequenceEpisodicMemory
 
 os.environ["OMP_NUM_THREADS"] = str(os.cpu_count())
 os.environ["MKL_NUM_THREADS"] = str(os.cpu_count())
@@ -143,15 +143,15 @@ class DQN(object):
         self.vol_2 = subagent_with_conv_patches(self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
         self.vol_3 = subagent_with_conv_patches(self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)        
         slope_relative_paths = [
-            "result/low_level/ETHUSDT/best_model/slope/1/best_model.pkl",
-            "result/low_level/ETHUSDT/best_model/slope/2/best_model.pkl",
-            "result/low_level/ETHUSDT/best_model/slope/3/best_model.pkl"
+            "result/low_level/ETHUSDT/slope/1/best_model.pkl",
+            "result/low_level/ETHUSDT/slope/2/best_model.pkl",
+            "result/low_level/ETHUSDT/slope/3/best_model.pkl"
         ]
         
         vol_relative_paths = [
-            "result/low_level/ETHUSDT/best_model/vol/1/best_model.pkl",
-            "result/low_level/ETHUSDT/best_model/vol/2/best_model.pkl",
-            "result/low_level/ETHUSDT/best_model/vol/3/best_model.pkl"
+            "result/low_level/ETHUSDT/vol/1/best_model.pkl",
+            "result/low_level/ETHUSDT/vol/2/best_model.pkl",
+            "result/low_level/ETHUSDT/vol/3/best_model.pkl"
         ]
         
         # Combine root to the path
@@ -197,7 +197,7 @@ class DQN(object):
         self.decay_length = args.decay_length
         self.epsilon_scheduler = LinearDecaySchedule(start_epsilon=self.epsilon_start, end_epsilon=self.epsilon_end, decay_length=self.decay_length)
         self.epsilon = args.epsilon_start
-        self.memory = episodicmemory(4320, 5, self.n_state_1, self.n_state_2, 64, self.device)
+        self.memory = SequenceEpisodicMemory(4320, 5, self.n_state_1, self.n_state_2, 64, self.device, seq_len=20)
 
     def calculate_q(self, w, qs):
         q_tensor = torch.stack(qs)
@@ -350,8 +350,10 @@ class DQN(object):
         previous_action = torch.unsqueeze(
             torch.tensor(info["previous_action"]).long().to(self.device),
             0).to(self.device)
+
         with torch.no_grad():
             hs = self.hyperagent.encode(x1, x2, previous_action).cpu().numpy()
+            hs = hs.squeeze(0)
         return hs
 
 
