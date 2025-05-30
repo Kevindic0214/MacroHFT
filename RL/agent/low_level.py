@@ -15,7 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 warnings.filterwarnings("ignore")
 
-ROOT = str(pathlib.Path(__file__).resolve().parents[3])
+ROOT = str(pathlib.Path(__file__).resolve().parents[2])
 sys.path.append(ROOT)
 sys.path.insert(0, ".")
 
@@ -61,21 +61,21 @@ parser.add_argument("--n_step", type=int, default=1)
 parser.add_argument("--epoch_number", type=int, default=15)
 parser.add_argument("--label", type=str, default="label_1")
 parser.add_argument("--clf", type=str, default="slope")
-parser.add_argument("--alpha", type=float, default="0")
+parser.add_argument("--alpha", type=float, default=0.0)
 parser.add_argument("--device", type=str, default="cuda:0")
-parser.add_argument("--num_quantiles", type=int, default=51)  # Added for QR-DQN
+parser.add_argument("--num_quantiles", type=int, default=51)
 parser.add_argument(
     "--kappa", type=float, default=1.0
-)  # Huber loss parameter for QR-DQN
+)
 
 
 def seed_torch(seed):
     random.seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)  # 为了禁止hash随机化，使得实验可复现
+    os.environ["PYTHONHASHSEED"] = str(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
+    torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
@@ -86,30 +86,36 @@ def calculate_alpha(diff, k):
 
 
 class DQN(object):
-    def __init__(self, args):  # 定义DQN的一系列属性
-        self.seed = args.seed
+    def __init__(self, args):
+        self.args = args
+        self.seed = self.args.seed
         seed_torch(self.seed)
         if torch.cuda.is_available():
-            self.device = torch.device(args.device)
+            self.device = torch.device(self.args.device)
         else:
             self.device = torch.device("cpu")
+
+        self.alpha_kl = float(self.args.alpha)
+
         self.result_path = os.path.join(
-            "./result/low_level",
-            "{}".format(args.dataset),
-            "{}".format(args.clf),
-            str(int(args.alpha)),
-            args.label,
+            ROOT,
+            "result",
+            "low_level",
+            "{}".format(self.args.dataset),
+            "{}".format(self.args.clf),
+            str(int(self.args.alpha)),
+            self.args.label,
         )
-        self.label = int(args.label.split("_")[1])
+        self.label = int(self.args.label.split("_")[1])
         self.model_path = os.path.join(self.result_path, "seed_{}".format(self.seed))
         self.train_data_path = os.path.join(
-            ROOT, "MacroHFT", "data", args.dataset, "train"
+            ROOT, "data", self.args.dataset, "train"
         )
-        self.val_data_path = os.path.join(ROOT, "MacroHFT", "data", args.dataset, "val")
+        self.val_data_path = os.path.join(ROOT, "data", self.args.dataset, "val")
         self.test_data_path = os.path.join(
-            ROOT, "MacroHFT", "data", args.dataset, "test"
+            ROOT, "data", self.args.dataset, "test"
         )
-        if args.clf == "slope":
+        if self.args.clf == "slope":
             with open(
                 os.path.join(self.train_data_path, "slope_labels.pkl"), "rb"
             ) as file:
@@ -122,7 +128,7 @@ class DQN(object):
                 os.path.join(self.test_data_path, "slope_labels.pkl"), "rb"
             ) as file:
                 self.test_index = pickle.load(file)
-        elif args.clf == "vol":
+        elif self.args.clf == "vol":
             with open(
                 os.path.join(self.train_data_path, "vol_labels.pkl"), "rb"
             ) as file:
@@ -134,8 +140,8 @@ class DQN(object):
             ) as file:
                 self.test_index = pickle.load(file)
 
-        self.dataset = args.dataset
-        self.clf = args.clf
+        self.dataset = self.args.dataset
+        self.clf = self.args.clf
         if "BTC" in self.dataset:
             self.max_holding_number = 0.01
         elif "ETH" in self.dataset:
@@ -146,36 +152,36 @@ class DQN(object):
             self.max_holding_number = 10
         else:
             raise Exception("we do not support other dataset yet")
-        self.epoch_number = args.epoch_number
+        self.epoch_number = self.args.epoch_number
 
         self.log_path = os.path.join(self.model_path, "log")
         if not os.path.exists(self.log_path):
             os.makedirs(self.log_path)
         self.writer = SummaryWriter(self.log_path)
         self.update_counter = 0
-        self.q_value_memorize_freq = args.q_value_memorize_freq
+        self.q_value_memorize_freq = self.args.q_value_memorize_freq
 
         if not os.path.exists(self.model_path):
             os.makedirs(self.model_path)
 
         self.tech_indicator_list = np.load(
-            "./data/feature_list/single_features.npy", allow_pickle=True
+            os.path.join(ROOT, "data", "feature_list", "single_features.npy"), allow_pickle=True
         ).tolist()
         self.tech_indicator_list_trend = np.load(
-            "./data/feature_list/trend_features.npy", allow_pickle=True
+            os.path.join(ROOT, "data", "feature_list", "trend_features.npy"), allow_pickle=True
         ).tolist()
 
-        self.transcation_cost = args.transcation_cost
-        self.back_time_length = args.back_time_length
+        self.transcation_cost = self.args.transcation_cost
+        self.back_time_length = self.args.back_time_length
         self.n_action = 2
         self.n_state_1 = len(self.tech_indicator_list)
         self.n_state_2 = len(self.tech_indicator_list_trend)
 
         # QR-DQN specific parameters
-        self.num_quantiles = args.num_quantiles
-        self.kappa = args.kappa
+        self.num_quantiles = self.args.num_quantiles
+        self.kappa = self.args.kappa
         # Precompute tau values (cumulative probabilities) for quantile midpoints
-        self.cumulative_density = (
+        self.tau_values = (
             torch.arange(self.num_quantiles, device=self.device, dtype=torch.float32)
             + 0.5
         ) / self.num_quantiles
@@ -188,24 +194,23 @@ class DQN(object):
             self.device
         )
         self.hardupdate()
-        self.update_times = args.update_times
-        self.optimizer = torch.optim.Adam(self.eval_net.parameters(), lr=args.lr)
-        # self.loss_func = nn.MSELoss() # Not used directly for QR-DQN's main loss
-        self.batch_size = args.batch_size
-        self.gamma = args.gamma
-        self.tau = args.tau
-        self.n_step = args.n_step
-        self.eval_update_freq = args.eval_update_freq
-        self.buffer_size = args.buffer_size
-        self.epsilon_start = args.epsilon_start
-        self.epsilon_end = args.epsilon_end
-        self.decay_length = args.decay_length
+        self.update_times = self.args.update_times
+        self.optimizer = torch.optim.Adam(self.eval_net.parameters(), lr=self.args.lr)
+        self.batch_size = self.args.batch_size
+        self.gamma = self.args.gamma
+        self.tau = self.args.tau
+        self.n_step = self.args.n_step
+        self.eval_update_freq = self.args.eval_update_freq
+        self.buffer_size = self.args.buffer_size
+        self.epsilon_start = self.args.epsilon_start
+        self.epsilon_end = self.args.epsilon_end
+        self.decay_length = self.args.decay_length
         self.epsilon_scheduler = LinearDecaySchedule(
             start_epsilon=self.epsilon_start,
             end_epsilon=self.epsilon_end,
             decay_length=self.decay_length,
         )
-        self.epsilon = args.epsilon_start
+        self.epsilon = self.args.epsilon_start
 
     def update(self, replay_buffer):
         self.eval_net.train()
@@ -227,17 +232,17 @@ class DQN(object):
             ).mean(dim=2)
             a_argmax = next_q_values_eval.argmax(
                 dim=-1, keepdim=True
-            )  # Shape: (batch_size, 1)
+            )
 
             # Gather quantiles for the selected next actions from target_net's output
             a_argmax_expanded = a_argmax.unsqueeze(-1).expand(
                 -1, -1, self.num_quantiles
-            )  # Shape: (batch_size, 1, num_quantiles)
+            )
             next_best_quantiles = next_q_quantiles_target.gather(
                 1, a_argmax_expanded
             ).squeeze(
                 1
-            )  # Shape: (batch_size, num_quantiles)
+            )
 
             # Compute target quantile values (Bellman update for quantiles)
             # target_z_j = r + gamma * z_target_j(s', a'*)
@@ -256,10 +261,10 @@ class DQN(object):
         # current_q_quantiles_eval shape: (batch_size, action_dim, num_quantiles)
 
         # Gather the quantiles for the actions taken in the batch
-        action_batch = batch["action"].long()  # Shape: (batch_size, 1)
+        action_batch = batch["action"].long()
         action_batch_expanded = action_batch.unsqueeze(-1).expand(
             -1, -1, self.num_quantiles
-        )  # Shape: (batch_size, 1, num_quantiles)
+        )
         current_z = current_q_quantiles_eval.gather(1, action_batch_expanded).squeeze(1)
         # current_z shape: (batch_size, num_quantiles)
 
@@ -268,12 +273,10 @@ class DQN(object):
         # target_z has N_target quantiles (self.num_quantiles)
         # current_z has N_current quantiles (self.num_quantiles)
         delta_ij = target_z.unsqueeze(1) - current_z.unsqueeze(2)
-        # delta_ij shape: (batch_size, N_target_quantiles, N_current_quantiles)
-        # Here, N_target_quantiles is dim 1, N_current_quantiles is dim 2 after unsqueezing.
-        # Let's adjust to (batch_size, N_current_quantiles, N_target_quantiles) to match Dopamine's formulation
-        delta_ij = target_z.unsqueeze(2) - current_z.unsqueeze(
-            1
-        )  # (B, N_current, N_target)
+        # delta_ij shape: (batch_size, N_eval, N_target)
+        # target_z.unsqueeze(1): (B, 1, N_target)
+        # current_z.unsqueeze(2): (B, N_eval, 1)
+        # So delta_ij becomes (B, N_eval, N_target)
 
         abs_delta_ij = torch.abs(delta_ij)
         huber_loss_values = torch.where(
@@ -282,25 +285,25 @@ class DQN(object):
             self.kappa * (abs_delta_ij - 0.5 * self.kappa),
         )
 
-        # self.cumulative_density is tau_i (for current quantiles)
-        # Shape: (N_current_quantiles,)
-        tau_i = self.cumulative_density.unsqueeze(0).unsqueeze(
+        # self.tau_values is tau_i (for current quantiles)
+        # Shape: (N_eval_quantiles,)
+        tau_i = self.tau_values.unsqueeze(0).unsqueeze(
             -1
-        )  # Shape: (1, N_current_quantiles, 1)
+        )
 
         # Pairwise quantile loss: |tau_i - I(delta_ij < 0)| * huber_loss
-        quantile_huber_loss = (
+        quantile_huber_loss_pairwise = (
             torch.abs(tau_i - (delta_ij < 0).float()) * huber_loss_values
         )
 
-        # Sum over current quantiles (dim 1), mean over target quantiles (dim 2), mean over batch
-        loss_q = quantile_huber_loss.sum(dim=1).mean(dim=1).mean()
+        # Sum over current quantiles (dim 1 refers to N_eval), mean over target quantiles (dim 2 refers to N_target), mean over batch
+        quantile_regression_loss = quantile_huber_loss_pairwise.sum(dim=1).mean(dim=1).mean()
 
         # KL divergence for imitation learning (optional)
         # Use mean of quantiles for Q-values in KL divergence
         q_values_for_kl = current_q_quantiles_eval.mean(
             dim=2
-        )  # Shape: (batch_size, action_dim)
+        )
         demonstration = batch["demo_action"]
 
         # Ensure q_values_for_kl and demonstration have the same shape for kl_div
@@ -320,12 +323,11 @@ class DQN(object):
             (q_values_for_kl.softmax(dim=-1) + 1e-8).log(),
             (
                 demonstration.softmax(dim=-1) + 1e-8
-            ),  # Assuming demonstration needs softmax too
+            ),
             reduction="batchmean",
         )
 
-        alpha = args.alpha  # Make sure args is accessible or pass it to __init__
-        loss = loss_q + alpha * KL_loss
+        loss = quantile_regression_loss + self.alpha_kl * KL_loss
         self.optimizer.zero_grad()
         loss.backward()
 
@@ -346,7 +348,7 @@ class DQN(object):
         q_target_mean_for_log = target_z.mean(dim=1).mean().cpu()
 
         return (
-            loss_q.cpu(),
+            quantile_regression_loss.cpu(),
             KL_loss.cpu(),
             q_current_mean_for_log,
             q_target_mean_for_log,
@@ -366,11 +368,11 @@ class DQN(object):
             # Get quantiles from network
             actions_value_quantiles = self.eval_net(
                 x1, x2, previous_action
-            )  # Shape (batch_size, action_dim, num_quantiles)
+            )
             # Take mean over quantiles to get Q-values
             actions_value = actions_value_quantiles.mean(
                 dim=2
-            )  # Shape (batch_size, action_dim)
+            )
             action = torch.max(actions_value, 1)[1].data.cpu().numpy()
             action = action[0]
         else:
@@ -387,11 +389,11 @@ class DQN(object):
         # Get quantiles from network
         actions_value_quantiles = self.eval_net(
             x1, x2, previous_action
-        )  # Shape (batch_size, action_dim, num_quantiles)
+        )
         # Take mean over quantiles to get Q-values
         actions_value = actions_value_quantiles.mean(
             dim=2
-        )  # Shape (batch_size, action_dim)
+        )
         action = torch.max(actions_value, 1)[1].data.cpu().numpy()
         action = action[0]
         return action
@@ -407,10 +409,10 @@ class DQN(object):
         episode_counter = 0
         epoch_counter = 0
         self.replay_buffer = ReplayBuffer(
-            args, self.n_state_1, self.n_state_2, self.n_action
+            self.args, self.n_state_1, self.n_state_2, self.n_action
         )
         best_return_rate = -float("inf")
-        best_model = None
+        best_model_state_dict = None
         for sample in range(self.epoch_number):
             print("epoch ", epoch_counter + 1)
             random_list = self.train_index[self.label]
@@ -462,32 +464,32 @@ class DQN(object):
                     if step_counter % self.eval_update_freq == 0 and step_counter > (
                         self.batch_size + self.n_step
                     ):
-                        for i in range(self.update_times):
-                            td_error, KL_loss, q_eval, q_target = self.update(
+                        for _ in range(self.update_times):
+                            quantile_loss_val, kl_loss_val, q_eval_mean_val, q_target_mean_val = self.update(
                                 self.replay_buffer
                             )
                             if self.update_counter % self.q_value_memorize_freq == 1:
                                 self.writer.add_scalar(
-                                    tag="td_error",
-                                    scalar_value=td_error,
+                                    tag="quantile_regression_loss",
+                                    scalar_value=quantile_loss_val,
                                     global_step=self.update_counter,
                                     walltime=None,
                                 )
                                 self.writer.add_scalar(
                                     tag="KL_loss",
-                                    scalar_value=KL_loss,
+                                    scalar_value=kl_loss_val,
                                     global_step=self.update_counter,
                                     walltime=None,
                                 )
                                 self.writer.add_scalar(
-                                    tag="q_eval",
-                                    scalar_value=q_eval,
+                                    tag="q_eval_mean",
+                                    scalar_value=q_eval_mean_val,
                                     global_step=self.update_counter,
                                     walltime=None,
                                 )
                                 self.writer.add_scalar(
-                                    tag="q_target",
-                                    scalar_value=q_target,
+                                    tag="q_target_mean",
+                                    scalar_value=q_target_mean_val,
                                     global_step=self.update_counter,
                                     walltime=None,
                                 )
@@ -500,7 +502,7 @@ class DQN(object):
                 )
                 self.writer.add_scalar(
                     tag="return_rate_train",
-                    scalar_value=final_balance / (required_money),
+                    scalar_value=final_balance / (required_money) if required_money != 0 else 0,
                     global_step=episode_counter,
                     walltime=None,
                 )
@@ -522,14 +524,15 @@ class DQN(object):
                     global_step=episode_counter,
                     walltime=None,
                 )
-                epoch_return_rate_train_list.append(final_balance / (required_money))
+                if required_money != 0:
+                    epoch_return_rate_train_list.append(final_balance / required_money)
                 epoch_final_balance_train_list.append(final_balance)
                 epoch_required_money_train_list.append(required_money)
                 epoch_reward_sum_train_list.append(episode_reward_sum)
 
             epoch_counter += 1
             self.epsilon = self.epsilon_scheduler.get_epsilon(epoch_counter)
-            mean_return_rate_train = np.mean(epoch_return_rate_train_list)
+            mean_return_rate_train = np.mean(epoch_return_rate_train_list) if epoch_return_rate_train_list else 0
             mean_final_balance_train = np.mean(epoch_final_balance_train_list)
             mean_required_money_train = np.mean(epoch_required_money_train_list)
             mean_reward_sum_train = np.mean(epoch_reward_sum_train_list)
@@ -572,28 +575,25 @@ class DQN(object):
             return_rate_eval = (return_rate_0 + return_rate_1) / 2
             if return_rate_eval > best_return_rate:
                 best_return_rate = return_rate_eval
-                best_model = self.eval_net.state_dict()
+                best_model_state_dict = self.eval_net.state_dict()
                 print("best model updated to epoch ", epoch_counter)
             epoch_return_rate_train_list = []
             epoch_final_balance_train_list = []
             epoch_required_money_train_list = []
             epoch_reward_sum_train_list = []
-        best_model_dir = os.path.join(
-            "./result/low_level",
-            "{}".format(self.dataset),
-            "{}".format(self.clf),
-            str(self.label),
-        )
 
-        if not os.path.exists(best_model_dir):
-            os.makedirs(best_model_dir)
+        # Save the best model to self.model_path (seed-specific directory)
+        if best_model_state_dict is not None:
+            best_model_path = os.path.join(self.model_path, "best_model.pkl")
+            torch.save(best_model_state_dict, best_model_path)
+            print(f"Best model saved to {best_model_path}")
+        else:
+            print("No best model was saved (possibly no improvement over initial).")
 
-        best_model_path = os.path.join(best_model_dir, "best_model.pkl")
-        torch.save(best_model, best_model_path)
 
     def val_cluster(self, epoch_path, save_path, initial_action):
         self.eval_net.load_state_dict(
-            torch.load(os.path.join(epoch_path, "trained_model.pkl"))
+            torch.load(os.path.join(epoch_path, "trained_model.pkl"), map_location=self.device)
         )
         self.eval_net.eval()
         df_list = self.val_index[self.label]
@@ -638,8 +638,8 @@ class DQN(object):
             final_balance_list.append(final_balance)
             required_money_list.append(required_money)
             commission_fee_list.append(commission_fee)
-        action_list = np.array(action_list)
-        reward_list = np.array(reward_list)
+        action_list = np.array(action_list, dtype=object)
+        reward_list = np.array(reward_list, dtype=object)
         final_balance_list = np.array(final_balance_list)
         required_money_list = np.array(required_money_list)
         commission_fee_list = np.array(commission_fee_list)
@@ -665,9 +665,15 @@ class DQN(object):
             ),
             commission_fee_list,
         )
-        return_rate_mean = np.nan_to_num(
-            final_balance_list / required_money_list
-        ).mean()
+        # Handle division by zero for return_rate_mean
+        valid_indices = required_money_list != 0
+        if np.any(valid_indices):
+            return_rate_mean = np.nan_to_num(
+                final_balance_list[valid_indices] / required_money_list[valid_indices]
+            ).mean()
+        else:
+            return_rate_mean = 0.0
+
         np.save(
             os.path.join(
                 save_path, "return_rate_mean_val_{}.npy".format(initial_action)
