@@ -601,12 +601,10 @@ class DQN(object):
             epoch_required_money_train_list = []
             epoch_reward_sum_train_list = []
         best_model_path = os.path.join(
-            "./result/high_level", "{}".format(self.dataset), "best_model.pkl"
+            self.model_path, "best_model.pkl"
         )
         torch.save(best_model, best_model_path)
-        final_result_path = os.path.join(
-            "./result/high_level", "{}".format(self.dataset)
-        )
+        final_result_path = self.model_path
         self.test_cluster(best_model_path, final_result_path)
 
     def val_cluster(self, model_path, save_path):
@@ -726,21 +724,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print(args)
     agent = DQN(args)
-
-    # 設定已訓練模型的路徑
-    best_model_path = os.path.join(
-        "./result/high_level", "{}".format(args.dataset), "best_model.pkl"
-    )
-    # 設定測試結果的儲存路徑
-    final_result_path = os.path.join("./result/high_level", "{}".format(args.dataset))
-
-    # 檢查模型檔案是否存在
-    if os.path.exists(best_model_path):
-        print(f"找到已訓練的模型: {best_model_path}")
-        print(f"將使用此模型進行測試，結果將儲存至: {final_result_path}")
-        agent.test_cluster(best_model_path, final_result_path)
-    else:
-        print(f"錯誤：找不到已訓練的模型於 {best_model_path}")
-        print("請先執行訓練，或確認模型路徑是否正確。")
-
-    # agent.train() # 註解掉或刪除此行以跳過訓練
+    agent.train()
