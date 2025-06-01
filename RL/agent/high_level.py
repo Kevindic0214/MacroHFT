@@ -128,14 +128,14 @@ class DQN(object):
         self.vol_3 = subagent(
             self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)        
         model_list_slope = [
-            "./result/low_level/ETHUSDT/best_model/slope/1/best_model.pkl", 
-            "./result/low_level/ETHUSDT/best_model/slope/2/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/slope/3/best_model.pkl"
+            "./result/low_level/ETHUSDT/slope.C51/0.0/label_3/seed_12345/best_model.pkl", 
+            "./result/low_level/ETHUSDT/slope.C51/1.0/label_1/seed_12345/best_model.pkl",
+            "./result/low_level/ETHUSDT/slope.C51/4.0/label_2/seed_12345/best_model.pkl"
         ]
         model_list_vol = [
-            "./result/low_level/ETHUSDT/best_model/vol/1/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/vol/2/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/vol/3/best_model.pkl"
+            "./result/low_level/ETHUSDT/vol.C51/1.0/label_2/seed_12345/best_model.pkl",
+            "./result/low_level/ETHUSDT/vol.C51/1.0/label_3/seed_12345/best_model.pkl",
+            "./result/low_level/ETHUSDT/vol.C51/4.0/label_1/seed_12345/best_model.pkl"
         ]
         self.slope_1.load_state_dict(
             torch.load(model_list_slope[0], map_location=self.device))
@@ -185,134 +185,307 @@ class DQN(object):
         self.epsilon = args.epsilon_start
         self.memory = episodicmemory(4320, 5, self.n_state_1, self.n_state_2, 64, self.device)
 
-    def calculate_q(self, w, qs):
-        q_tensor = torch.stack(qs)
-        q_tensor = q_tensor.permute(1, 0, 2)
-        weights_reshaped = w.view(-1, 1, 6)
-        combined_q = torch.bmm(weights_reshaped, q_tensor).squeeze(1)
-        
-        return combined_q
+        # For Distributional RL
+        # Assuming all subagents share the same atom configuration from their init
+        # (e.g., num_atoms=51, v_min=-5.0, v_max=5.0 by default in subagent class)
+        self.num_atoms = self.slope_agents[0].num_atoms
+        self.support = self.slope_agents[0].support.to(self.device)  # Shape: (num_atoms,)
+        self.v_min = self.support[0].item()
+        self.v_max = self.support[-1].item()
+        if self.num_atoms > 1:
+            self.delta_z = (self.v_max - self.v_min) / (self.num_atoms - 1)
+        else: # Avoid division by zero if num_atoms is 1 (should not happen for distributional)
+            self.delta_z = 1.0
 
+    def calculate_q(self, w, qs):
+        # qs is a list of 6 tensors, each with shape (batch_size, action_dim, num_atoms)
+        # w is a tensor with shape (batch_size, 6)
+        
+        # Stack qs to shape (6, batch_size, action_dim, num_atoms)
+        q_tensor = torch.stack(qs, dim=0)
+        
+        # Permute to (batch_size, 6, action_dim, num_atoms)
+        q_tensor = q_tensor.permute(1, 0, 2, 3)
+        
+        # Reshape w for broadcasting: (batch_size, 6) -> (batch_size, 6, 1, 1)
+        # Use w.shape[0] for current batch_size
+        current_batch_size = w.shape[0]
+        w_reshaped = w.view(current_batch_size, 6, 1, 1)
+        
+        # Weighted sum: (B, 6, 1, 1) * (B, 6, A, N) -> (B, 6, A, N)
+        # Sum over dim=1 (the '6' subagents dimension) -> (B, A, N)
+        combined_q_dist = (w_reshaped * q_tensor).sum(dim=1)
+        
+        return combined_q_dist # Shape (batch_size, action_dim, num_atoms)
 
     def update(self, replay_buffer):
-        batch, _, _ = replay_buffer.sample()
+        batch, tree_indices, IS_weights = replay_buffer.sample()
+        if batch is None:
+            # Return dummy tensors with appropriate types if needed by caller
+            return torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0)
+
+        current_batch_size = batch['reward'].shape[0] # Actual batch size from sample
+        IS_weights_tensor = torch.tensor(IS_weights, device=self.device, dtype=torch.float32).squeeze() # (batch_size,)
+
+        # Log PER-related metrics
+        if hasattr(replay_buffer, 'PER_b') and hasattr(replay_buffer, 'max_priority'): # Check if PER is active
+            self.writer.add_scalar('PER/beta', replay_buffer.PER_b, global_step=self.update_counter)
+            self.writer.add_scalar('PER/avg_IS_weight', IS_weights_tensor.mean().item(), global_step=self.update_counter)
+            self.writer.add_scalar('PER/max_IS_weight', IS_weights_tensor.max().item(), global_step=self.update_counter)
+            self.writer.add_scalar('PER/buffer_max_priority', replay_buffer.max_priority, global_step=self.update_counter)
+
         batch = {k: v.to(self.device) for k, v in batch.items()}
         
+        # Get Q-distributions for current states and actions
         w_current = self.hyperagent(batch['state'], batch['state_trend'], batch['state_clf'], batch['previous_action'])
-        w_next = self.hyperagent_target(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
-        w_next_ = self.hyperagent(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
-
-
-        qs_current = [
-                    self.slope_agents[0](batch['state'], batch['state_trend'], batch['previous_action']),
-                    self.slope_agents[1](batch['state'], batch['state_trend'], batch['previous_action']),
-                    self.slope_agents[2](batch['state'], batch['state_trend'], batch['previous_action']),
-                    self.vol_agents[0](batch['state'], batch['state_trend'], batch['previous_action']),
-                    self.vol_agents[1](batch['state'], batch['state_trend'], batch['previous_action']),
-                    self.vol_agents[2](batch['state'], batch['state_trend'], batch['previous_action'])
+        qs_current_list = [
+            self.slope_agents[i](batch['state'], batch['state_trend'], batch['previous_action']) for i in range(3)
+        ] + [
+            self.vol_agents[i](batch['state'], batch['state_trend'], batch['previous_action']) for i in range(3)
         ]
-        qs_next = [
-                    self.slope_agents[0](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.slope_agents[1](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.slope_agents[2](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.vol_agents[0](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.vol_agents[1](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
-                    self.vol_agents[2](batch['next_state'], batch['next_state_trend'], batch['next_previous_action'])
+        # q_distribution_all_actions: (batch_size, action_dim, num_atoms)
+        q_distribution_all_actions = self.calculate_q(w_current, qs_current_list)
+        
+        # Gather Q-distribution for the action taken: (batch_size, num_atoms)
+        # batch['action'] shape is (batch_size, 1)
+        current_action_q_logits = q_distribution_all_actions.gather(
+            1, batch['action'].unsqueeze(-1).expand(-1, -1, self.num_atoms)
+        ).squeeze(1)
+
+        # Get Q-distributions for next states (online net for action selection - Double DQN)
+        w_next_online = self.hyperagent(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
+        qs_next_online_list = [
+            self.slope_agents[i](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']) for i in range(3)
+        ] + [
+            self.vol_agents[i](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']) for i in range(3)
         ]
-        q_distribution = self.calculate_q(w_current, qs_current)
-        q_current = q_distribution.gather(-1, batch['action']).squeeze(-1)
-        a_argmax = self.calculate_q(w_next_, qs_next).argmax(dim=-1, keepdim=True)
-        q_nexts = self.calculate_q(w_next, qs_next)
-        q_target = batch['reward'] + self.gamma * (1 - batch['terminal']) * q_nexts.gather(-1, a_argmax).squeeze(-1)
+        # q_next_online_dist_all_actions: (batch_size, action_dim, num_atoms)
+        q_next_online_dist_all_actions = self.calculate_q(w_next_online, qs_next_online_list)
+        
+        # Calculate expected Q-values for action selection: (batch_size, action_dim)
+        expected_q_next_online = (q_next_online_dist_all_actions * self.support.view(1, 1, -1)).sum(dim=2)
+        # Select best action using online network: (batch_size, 1)
+        a_argmax_next = expected_q_next_online.argmax(dim=1, keepdim=True)
 
-        td_error = self.loss_func(q_current, q_target)
-        memory_error = self.loss_func(q_current, batch['q_memory'])
+        # Get Q-distributions for next states (target net for Q-value evaluation - Double DQN)
+        with torch.no_grad():
+            w_next_target = self.hyperagent_target(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
+            qs_next_target_list = [
+                self.slope_agents[i](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']) for i in range(3)
+            ] + [
+                self.vol_agents[i](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']) for i in range(3)
+            ]
+            # q_next_target_dist_all_actions: (batch_size, action_dim, num_atoms)
+            q_next_target_dist_all_actions = self.calculate_q(w_next_target, qs_next_target_list)
 
-        demonstration = batch['demo_action']
+            # Gather Q-distribution for the best action a_argmax_next from target network: (batch_size, num_atoms)
+            next_action_target_q_logits = q_next_target_dist_all_actions.gather(
+                1, a_argmax_next.unsqueeze(-1).expand(-1, -1, self.num_atoms)
+            ).squeeze(1) # These are logits, not probabilities yet.
+            
+            # Compute target distribution (projection)
+            # rewards: (batch_size,), terminals: (batch_size,)
+            # support: (num_atoms,)
+            # next_action_target_q_probs: (batch_size, num_atoms)
+            next_action_target_q_probs = F.softmax(next_action_target_q_logits, dim=1)
+
+            rewards_b = batch['reward']
+            terminals_b = batch['terminal']
+            
+            # tz = R + gamma * z', clamped. Shape: (batch_size, num_atoms)
+            tz = rewards_b.unsqueeze(1) + self.gamma * self.support.unsqueeze(0) * (1 - terminals_b.unsqueeze(1))
+            tz = torch.clamp(tz, self.v_min, self.v_max)
+
+            # b_j = (tz_j - v_min) / delta_z. Shape: (batch_size, num_atoms)
+            b = (tz - self.v_min) / self.delta_z
+            l = b.floor().long()
+            u = b.ceil().long()
+
+            # Handle cases where l = u for atoms at v_min or v_max after clamping
+            # (prevents all mass on one atom if tz is exactly on a support atom)
+            # This ensures that mass is distributed even if l=u initially, unless tz is an exact boundary.
+            l[(u > 0) * (l == u)] -= 1 
+            l = torch.clamp(l, 0, self.num_atoms - 1) # Ensure l is within bounds after adjustment
+            u[(l < (self.num_atoms - 1)) * (l == u)] += 1
+            u = torch.clamp(u, 0, self.num_atoms - 1) # Ensure u is within bounds after adjustment
+
+            # Projected distribution. Shape: (batch_size, num_atoms)
+            projected_target_distribution = torch.zeros_like(next_action_target_q_probs)
+            
+            # Distribute probabilities
+            # m_probs_next is next_action_target_q_probs (B, N)
+            # l, u are (B, N) - indices for atoms
+            # b is (B, N) - fractional position
+            
+            # Equivalent to:
+            # for i in range(current_batch_size):
+            #    for j in range(self.num_atoms):
+            #        uidx, lidx = u[i, j], l[i, j]
+            #        prob = next_action_target_q_probs[i, j]
+            #        projected_target_distribution[i, lidx] += prob * (u[i, j].float() - b[i, j])
+            #        projected_target_distribution[i, uidx] += prob * (b[i, j] - l[i, j].float())
+            # Vectorized version:
+            m_l = next_action_target_q_probs * (u.float() - b) # mass to lower index
+            m_u = next_action_target_q_probs * (b - l.float()) # mass to upper index
+
+            # Iterate over batch elements for scatter_add_ to avoid issues with duplicate indices in one call
+            for i in range(current_batch_size):
+                projected_target_distribution[i].scatter_add_(0, l[i], m_l[i])
+                projected_target_distribution[i].scatter_add_(0, u[i], m_u[i])
+        
+        # Distributional Loss (Cross-Entropy)
+        # current_action_q_logits: (batch_size, num_atoms)
+        # projected_target_distribution: (batch_size, num_atoms), should be detached
+        log_p_current = F.log_softmax(current_action_q_logits, dim=1)
+        # Cross-entropy: -sum(target_prob * log(current_prob)) per sample
+        element_wise_cross_entropy_loss = -(projected_target_distribution.detach() * log_p_current).sum(dim=1)
+        
+        # Log raw distributional loss (before IS weighting)
+        self.writer.add_scalar('Loss/raw_dist_loss_mean', element_wise_cross_entropy_loss.mean().item(), global_step=self.update_counter)
+        
+        loss_td = (IS_weights_tensor * element_wise_cross_entropy_loss).mean()
+        
+        # Memory error (compare expected Q value of current action with q_memory)
+        expected_q_current_action = (F.softmax(current_action_q_logits, dim=1) * self.support.view(1, -1)).sum(dim=1)
+        memory_error = self.loss_func(expected_q_current_action, batch['q_memory']) # q_memory is scalar
+
+        # KL_loss (compare expected Q values of all actions with teacher_q_values)
+        # q_distribution_all_actions: (batch_size, action_dim, num_atoms)
+        expected_q_all_actions = (F.softmax(q_distribution_all_actions, dim=2) * self.support.view(1, 1, -1)).sum(dim=2) # (B, A)
+        
+        teacher_q_values_batch = batch['teacher_q_values'] # (B, A)
+        # Ensure teacher_q_values are probabilities if used in KLDiv like this
+        # Assuming teacher_q_values_batch are logits that need softmax
+        log_softmax_expected_q = F.log_softmax(expected_q_all_actions, dim=-1)
+        softmax_teacher_q = F.softmax(teacher_q_values_batch, dim=-1)
+
         KL_loss = F.kl_div(
-            (q_distribution.softmax(dim=-1) + 1e-8).log(),
-            (demonstration.softmax(dim=-1) + 1e-8),
-            reduction="batchmean",
+            log_softmax_expected_q,
+            softmax_teacher_q,
+            reduction="batchmean", # computes sum_i(target_i * (log(target_i) - log(input_i))) / batch_size
+            log_target=False # if teacher_q_values_batch is already log_softmax, set True
         )
-
-        loss = td_error + args.alpha * memory_error + args.beta * KL_loss
+        # If teacher_q_values are already probabilities, kl_div expects log_target=False
+        # If we want standard KL div D_KL(P || Q) = sum P * log(P/Q)
+        # Here P = softmax_teacher_q, Q = softmax_expected_q
+        # F.kl_div input is Q.log(), target is P
+        # So this is D_KL( softmax_teacher_q || softmax_expected_q )
+        
+        loss = loss_td + args.alpha * memory_error + args.beta * KL_loss
         self.optimizer.zero_grad()
         loss.backward()
 
-        torch.nn.utils.clip_grad_norm_(self.hyperagent.parameters(), 1)
+        torch.nn.utils.clip_grad_norm_(self.hyperagent.parameters(), 1.0) # Clip grad norm
         self.optimizer.step()
+        
+        # Update target network
         for param, target_param in zip(self.hyperagent.parameters(), self.hyperagent_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+        
+        # Update PER priorities
+        abs_td_errors = element_wise_cross_entropy_loss.abs().detach().cpu().numpy()
+        replay_buffer.update_priorities(tree_indices, abs_td_errors)
+        
         self.update_counter += 1
-        return td_error.cpu(), memory_error.cpu(), KL_loss.cpu(), torch.mean(q_current.cpu()), torch.mean(q_target.cpu())
+        # Return expected Q-values for logging, consistent with previous version if possible
+        # q_eval for current action, q_target could be expected value of projected distribution
+        q_eval_log = expected_q_current_action.mean().detach().cpu()
+        
+        # For q_target_log, calculate expected value of the projected target distribution
+        # This is tricky because projected_target_distribution is for chosen next actions based on online net,
+        # but uses target net values.
+        # A simpler consistent log might be the expected value of next_action_target_q_logits
+        expected_next_q_target_log = (F.softmax(next_action_target_q_logits.detach(), dim=1) * self.support.view(1, -1)).sum(dim=1).mean().cpu()
+
+        return loss_td.detach().cpu(), memory_error.detach().cpu(), KL_loss.detach().cpu(), q_eval_log, expected_next_q_target_log
 
     def act(self, state, state_trend, state_clf, info):
-        x1 = torch.FloatTensor(state).to(self.device)
-        x2 = torch.FloatTensor(state_trend).to(self.device)
+        x1 = torch.FloatTensor(state).unsqueeze(0).to(self.device) # Add batch dim
+        x2 = torch.FloatTensor(state_trend).unsqueeze(0).to(self.device) # Add batch dim
         x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
-        previous_action = torch.unsqueeze(
-            torch.tensor(info["previous_action"]).long().to(self.device),
-            0).to(self.device)
+        previous_action = torch.tensor([info["previous_action"]], dtype=torch.long, device=self.device).unsqueeze(0) # Add batch dim, ensure 2D
+
         if np.random.uniform() < (1-self.epsilon):
-            qs = [
-                    self.slope_agents[0](x1, x2, previous_action),
-                    self.slope_agents[1](x1, x2, previous_action),
-                    self.slope_agents[2](x1, x2, previous_action),
-                    self.vol_agents[0](x1, x2, previous_action),
-                    self.vol_agents[1](x1, x2, previous_action),
-                    self.vol_agents[2](x1, x2, previous_action)
-            ]
-            w = self.hyperagent(x1, x2, x3, previous_action)
-            actions_value = self.calculate_q(w, qs)
-            action = torch.max(actions_value, 1)[1].data.cpu().numpy()
-            action = action[0]
+            with torch.no_grad():
+                qs_list = [
+                        self.slope_agents[i](x1, x2, previous_action) for i in range(3)
+                    ] + [
+                        self.vol_agents[i](x1, x2, previous_action) for i in range(3)
+                    ]
+                w = self.hyperagent(x1, x2, x3, previous_action)
+                # actions_value_dist: (1, action_dim, num_atoms)
+                actions_value_dist = self.calculate_q(w, qs_list)
+                # expected_actions_value: (1, action_dim)
+                expected_actions_value = (F.softmax(actions_value_dist, dim=2) * self.support.view(1, 1, -1)).sum(dim=2)
+                action = torch.max(expected_actions_value, 1)[1].data.cpu().numpy()
+                action = action[0]
         else:
-            action_choice = [0,1]
+            action_choice = [0,1] # Assuming self.n_action is 2
             action = random.choice(action_choice)
         return action
 
     def act_test(self, state, state_trend, state_clf, info):
         with torch.no_grad():
-            x1 = torch.FloatTensor(state).to(self.device)
-            x2 = torch.FloatTensor(state_trend).to(self.device)
+            x1 = torch.FloatTensor(state).unsqueeze(0).to(self.device) # Add batch dim
+            x2 = torch.FloatTensor(state_trend).unsqueeze(0).to(self.device) # Add batch dim
             x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
-            previous_action = torch.unsqueeze(
-                torch.tensor(info["previous_action"]).long().to(self.device),
-                0).to(self.device)
-            qs = [
-                    self.slope_agents[0](x1, x2, previous_action),
-                    self.slope_agents[1](x1, x2, previous_action),
-                    self.slope_agents[2](x1, x2, previous_action),
-                    self.vol_agents[0](x1, x2, previous_action),
-                    self.vol_agents[1](x1, x2, previous_action),
-                    self.vol_agents[2](x1, x2, previous_action)
-            ]
+            previous_action = torch.tensor([info["previous_action"]], dtype=torch.long, device=self.device).unsqueeze(0) # Add batch dim
+
+            qs_list = [
+                    self.slope_agents[i](x1, x2, previous_action) for i in range(3)
+                ] + [
+                    self.vol_agents[i](x1, x2, previous_action) for i in range(3)
+                ]
             w = self.hyperagent(x1, x2, x3, previous_action)
-            actions_value = self.calculate_q(w, qs)
-            action = torch.max(actions_value, 1)[1].data.cpu().numpy()
+            # actions_value_dist: (1, action_dim, num_atoms)
+            actions_value_dist = self.calculate_q(w, qs_list)
+            # expected_actions_value: (1, action_dim)
+            expected_actions_value = (F.softmax(actions_value_dist, dim=2) * self.support.view(1, 1, -1)).sum(dim=2)
+            action = torch.max(expected_actions_value, 1)[1].data.cpu().numpy()
             action = action[0]
             return action
 
     def q_estimate(self, state, state_trend, state_clf, info):
+        # Ensure inputs are correctly unsqueezed if they represent a single sample
+        if state.ndim == 1: state = state[np.newaxis, :]
+        if state_trend.ndim == 1: state_trend = state_trend[np.newaxis, :]
+        if state_clf.ndim == 1: state_clf = state_clf[np.newaxis, :]
+        
         x1 = torch.FloatTensor(state).to(self.device)
         x2 = torch.FloatTensor(state_trend).to(self.device)
-        x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
-        previous_action = torch.unsqueeze(
-            torch.tensor(info["previous_action"]).long().to(self.device),
-            0).to(self.device)
-        qs = [
-                self.slope_agents[0](x1, x2, previous_action),
-                self.slope_agents[1](x1, x2, previous_action),
-                self.slope_agents[2](x1, x2, previous_action),
-                self.vol_agents[0](x1, x2, previous_action),
-                self.vol_agents[1](x1, x2, previous_action),
-                self.vol_agents[2](x1, x2, previous_action)
-        ]
-        w = self.hyperagent(x1, x2, x3, previous_action)
-        actions_value = self.calculate_q(w, qs)
-        q = torch.max(actions_value, 1)[0].detach().cpu().numpy()
+        x3 = torch.FloatTensor(state_clf).to(self.device)
         
-        return q
+        # Ensure previous_action is a tensor and has a batch dimension
+        if isinstance(info["previous_action"], (int, float)):
+            prev_action_val = [info["previous_action"]]
+        else: # Handle list or numpy array
+            prev_action_val = info["previous_action"]
+        if not isinstance(prev_action_val, torch.Tensor):
+             previous_action = torch.tensor(prev_action_val, dtype=torch.long, device=self.device)
+        else:
+            previous_action = prev_action_val.to(dtype=torch.long, device=self.device)
+
+        if previous_action.ndim == 1: # e.g. tensor([0])
+             previous_action = previous_action.unsqueeze(0) # -> tensor([[0]]) to match batch size of x1,x2,x3
+        elif previous_action.ndim == 0: # e.g. tensor(0)
+             previous_action = previous_action.view(1,1)
+
+        with torch.no_grad():
+            qs_list = [
+                    self.slope_agents[i](x1, x2, previous_action) for i in range(3)
+                ] + [
+                    self.vol_agents[i](x1, x2, previous_action) for i in range(3)
+                ]
+            w = self.hyperagent(x1, x2, x3, previous_action)
+            # actions_value_dist: (batch_size, action_dim, num_atoms)
+            actions_value_dist = self.calculate_q(w, qs_list)
+            # expected_actions_value: (batch_size, action_dim)
+            expected_actions_value = (F.softmax(actions_value_dist, dim=2) * self.support.view(1, 1, -1)).sum(dim=2)
+            q = torch.max(expected_actions_value, 1)[0].detach().cpu().numpy() # Max expected Q over actions
+            # If q_estimate is called with a single state, q will be a single value array.
+            if q.shape[0] == 1:
+                return q.item() # Return scalar if single estimate
+        return q # Return array if batched estimate
 
     def calculate_hidden(self, state, state_trend, info):
         x1 = torch.FloatTensor(state).to(self.device)
@@ -323,7 +496,6 @@ class DQN(object):
         with torch.no_grad():
             hs = self.hyperagent.encode(x1, x2, previous_action).cpu().numpy()
         return hs
-
 
     def train(self):
         epoch_return_rate_train_list = []
@@ -540,7 +712,7 @@ class DQN(object):
 
     def test_cluster(self, epoch_path, save_path):
         self.hyperagent.load_state_dict(
-            torch.load(os.path.join(epoch_path, "trained_model.pkl")))
+            torch.load(epoch_path))
         self.hyperagent.eval()
         counter = False
         action_list = []
