@@ -186,6 +186,7 @@ class DQN(object):
         self.epsilon_scheduler = LinearDecaySchedule(start_epsilon=self.epsilon_start, end_epsilon=self.epsilon_end, decay_length=self.decay_length)
         self.epsilon = args.epsilon_start
         self.memory = episodicmemory(4320, 5, self.n_state_1, self.n_state_2, 64, self.device)
+        self.args = args
 
     def calculate_q(self, w, qs):
         # qs is a list of tensors, each with shape (batch_size, action_dim, num_quantiles)
@@ -340,13 +341,13 @@ class DQN(object):
         epoch_reward_sum_train_list = []
         step_counter = 0
         episode_counter = 0
-        epoch_counter = 0
+        self.epoch_counter = 0
         best_return_rate = -float('inf')
         best_model = None
-        self.replay_buffer = ReplayBuffer_High(args, self.n_state_1, self.n_state_2, self.n_action) 
+        self.replay_buffer = ReplayBuffer_High(self.args, self.n_state_1, self.n_state_2, self.n_action)
         for sample in range(self.epoch_number):
-            epoch_start_time = time.time()
-            print('epoch ', epoch_counter + 1)
+            self.epoch_start_time = time.time()
+            print('epoch ', self.epoch_counter + 1)
             self.df = pd.read_feather(
                 os.path.join(self.train_data_path, "train.feather"))
             
@@ -437,8 +438,8 @@ class DQN(object):
             epoch_reward_sum_train_list.append(episode_reward_sum)
                 
 
-            epoch_counter += 1
-            self.epsilon = self.epsilon_scheduler.get_epsilon(epoch_counter)
+            self.epoch_counter += 1
+            self.epsilon = self.epsilon_scheduler.get_epsilon(self.epoch_counter)
             mean_return_rate_train = np.mean(epoch_return_rate_train_list)
             mean_final_balance_train = np.mean(epoch_final_balance_train_list)
             mean_required_money_train = np.mean(epoch_required_money_train_list)
@@ -446,29 +447,29 @@ class DQN(object):
             self.writer.add_scalar(
                     tag="epoch_return_rate_train",
                     scalar_value=mean_return_rate_train,
-                    global_step=epoch_counter,
+                    global_step=self.epoch_counter,
                     walltime=None,
                 )
             self.writer.add_scalar(
                 tag="epoch_final_balance_train",
                 scalar_value=mean_final_balance_train,
-                global_step=epoch_counter,
+                global_step=self.epoch_counter,
                 walltime=None,
                 )
             self.writer.add_scalar(
                 tag="epoch_required_money_train",
                 scalar_value=mean_required_money_train,
-                global_step=epoch_counter,
+                global_step=self.epoch_counter,
                 walltime=None,
                 )
             self.writer.add_scalar(
                 tag="epoch_reward_sum_train",
                 scalar_value=mean_reward_sum_train,
-                global_step=epoch_counter,
+                global_step=self.epoch_counter,
                 walltime=None,
                 )
             epoch_path = os.path.join(self.model_path,
-                                        "epoch_{}".format(epoch_counter))
+                                        "epoch_{}".format(self.epoch_counter))
             if not os.path.exists(epoch_path):
                 os.makedirs(epoch_path)
             torch.save(self.hyperagent.state_dict(),
@@ -496,7 +497,7 @@ class DQN(object):
         self.writer.add_scalar(
             tag="total_training_duration_seconds",
             scalar_value=total_training_duration,
-            global_step=epoch_counter
+            global_step=self.epoch_counter
         )
 
     def val_cluster(self, model_path, save_path):
@@ -554,12 +555,12 @@ class DQN(object):
                 commission_fee_list)
         return_rate = final_balance / required_money
 
-        epoch_duration = time.time() - epoch_start_time
-        print(f"Epoch {epoch_counter} finished. Duration: {epoch_duration:.2f} seconds")
+        epoch_duration = time.time() - self.epoch_start_time
+        print(f"Epoch {self.epoch_counter} finished. Duration: {epoch_duration:.2f} seconds")
         self.writer.add_scalar(
             tag="epoch_duration_seconds",
             scalar_value=epoch_duration,
-            global_step=epoch_counter
+            global_step=self.epoch_counter
         )
 
         return return_rate
