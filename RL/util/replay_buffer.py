@@ -215,11 +215,13 @@ class ReplayBuffer_High(object):
     PER_b_increment_per_sampling = 0.001
     abs_err_upper = 1.  # Clipped abs error
 
-    def __init__(self, args, state_dim, state_dim_2, action_dim):
+    def __init__(self, args, state_dim, state_dim_2, action_dim, num_atoms=51):
         self.tree = SumTree(args.buffer_size)
         self.batch_size = args.batch_size
         self.buffer_capacity = args.buffer_size
         self.seed = args.seed
+        self.action_dim = action_dim # Store action_dim
+        self.num_atoms = num_atoms   # Store num_atoms
         np.random.seed(self.seed)
         random.seed(self.seed)
         torch.manual_seed(self.seed)
@@ -227,22 +229,23 @@ class ReplayBuffer_High(object):
                         "state_trend": np.zeros((self.buffer_capacity, state_dim_2)),
                         "state_clf": np.zeros((self.buffer_capacity, 2)),
                         "previous_action": np.zeros((self.buffer_capacity)),
-                        "teacher_q_values": np.zeros((self.buffer_capacity, action_dim)),
+                        "teacher_q_values": np.zeros((self.buffer_capacity, action_dim, num_atoms)),
                         "action": np.zeros((self.buffer_capacity, 1)),
                         "reward": np.zeros(self.buffer_capacity),
                         "next_state": np.zeros((self.buffer_capacity, state_dim)),
                         "next_state_trend": np.zeros((self.buffer_capacity, state_dim_2)),
                         "next_state_clf": np.zeros((self.buffer_capacity, 2)),
                         "next_previous_action": np.zeros((self.buffer_capacity)),
-                        "next_teacher_q_values": np.zeros((self.buffer_capacity, action_dim)),
+                        "next_teacher_q_values": np.zeros((self.buffer_capacity, action_dim, num_atoms)),
                         "terminal": np.zeros(self.buffer_capacity),
                         "q_memory": np.zeros(self.buffer_capacity),
+                        "demo_action": np.zeros((self.buffer_capacity, action_dim, num_atoms)),
                        }
         self.max_priority = 1.0
         self.buffer_write_idx = 0
 
     def store_transition(self, state, state_trend, state_clf, previous_action, teacher_q_values, action, reward, 
-                                next_state, next_state_trend, next_state_clf, next_previous_action, next_teacher_q_values, terminal, q_memory):
+                                next_state, next_state_trend, next_state_clf, next_previous_action, next_teacher_q_values, terminal, q_memory, demo_action):
         current_buffer_idx = self.buffer_write_idx
 
         self.buffer["state"][current_buffer_idx] = state
@@ -260,6 +263,7 @@ class ReplayBuffer_High(object):
         self.buffer["next_teacher_q_values"][current_buffer_idx] = next_teacher_q_values
         self.buffer["terminal"][current_buffer_idx] = terminal
         self.buffer["q_memory"][current_buffer_idx] = float(q_memory[0]) if (hasattr(q_memory, "__len__") and len(q_memory) > 0) else float(q_memory)
+        self.buffer["demo_action"][current_buffer_idx] = demo_action
         
         self.tree.add(self.max_priority, current_buffer_idx)
         self.buffer_write_idx = (self.buffer_write_idx + 1) % self.buffer_capacity
