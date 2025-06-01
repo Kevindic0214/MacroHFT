@@ -4,6 +4,7 @@ import pathlib
 import random
 import sys
 import warnings
+import time
 
 import numpy as np
 import pandas as pd
@@ -46,12 +47,13 @@ parser.add_argument("--transcation_cost",type=float,default=0.2 / 1000)
 parser.add_argument("--back_time_length",type=int,default=1)
 parser.add_argument("--seed",type=int,default=12345)
 parser.add_argument("--n_step",type=int,default=1)
-parser.add_argument("--epoch_number",type=int,default=15)
+parser.add_argument("--epoch_number",type=int,default=8)
 parser.add_argument("--device",type=str,default="cuda:0")
 parser.add_argument("--alpha",type=float,default=0.5)
 parser.add_argument("--beta",type=int,default=5)
 parser.add_argument("--exp",type=str,default="exp1")
 parser.add_argument("--num_step",type=int,default=10)
+parser.add_argument("--num_quantiles", type=int, default=51)
 
 
 def seed_torch(seed):
@@ -116,26 +118,26 @@ class DQN(object):
         self.n_state_1 = len(self.tech_indicator_list)
         self.n_state_2 = len(self.tech_indicator_list_trend)
         self.slope_1 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
+            self.n_state_1, self.n_state_2, self.n_action, 64, args.num_quantiles).to(self.device)
         self.slope_2 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
+            self.n_state_1, self.n_state_2, self.n_action, 64, args.num_quantiles).to(self.device)
         self.slope_3 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
+            self.n_state_1, self.n_state_2, self.n_action, 64, args.num_quantiles).to(self.device)
         self.vol_1 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
+            self.n_state_1, self.n_state_2, self.n_action, 64, args.num_quantiles).to(self.device)
         self.vol_2 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)
+            self.n_state_1, self.n_state_2, self.n_action, 64, args.num_quantiles).to(self.device)
         self.vol_3 = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64).to(self.device)        
+            self.n_state_1, self.n_state_2, self.n_action, 64, args.num_quantiles).to(self.device)        
         model_list_slope = [
-            "./result/low_level/ETHUSDT/best_model/slope/1/best_model.pkl", 
-            "./result/low_level/ETHUSDT/best_model/slope/2/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/slope/3/best_model.pkl"
+            "./result/low_level/ETHUSDT/slope/0/label_3/seed_12345/best_model.pkl", 
+            "./result/low_level/ETHUSDT/slope/1/label_1/seed_12345/best_model.pkl",
+            "./result/low_level/ETHUSDT/slope/4/label_2/seed_12345/best_model.pkl"
         ]
         model_list_vol = [
-            "./result/low_level/ETHUSDT/best_model/vol/1/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/vol/2/best_model.pkl",
-            "./result/low_level/ETHUSDT/best_model/vol/3/best_model.pkl"
+            "./result/low_level/ETHUSDT/vol/1/label_2/seed_12345/best_model.pkl",
+            "./result/low_level/ETHUSDT/vol/1/label_3/seed_12345/best_model.pkl",
+            "./result/low_level/ETHUSDT/vol/4/label_1/seed_12345/best_model.pkl"
         ]
         self.slope_1.load_state_dict(
             torch.load(model_list_slope[0], map_location=self.device))
@@ -186,10 +188,13 @@ class DQN(object):
         self.memory = episodicmemory(4320, 5, self.n_state_1, self.n_state_2, 64, self.device)
 
     def calculate_q(self, w, qs):
-        q_tensor = torch.stack(qs)
-        q_tensor = q_tensor.permute(1, 0, 2)
-        weights_reshaped = w.view(-1, 1, 6)
-        combined_q = torch.bmm(weights_reshaped, q_tensor).squeeze(1)
+        # qs is a list of tensors, each with shape (batch_size, action_dim, num_quantiles)
+        # We need to take the mean over the quantiles dimension to get Q-values
+        qs_mean = [q.mean(dim=2) for q in qs] # Calculate mean over num_quantiles
+        q_tensor = torch.stack(qs_mean) # Shape: (6, batch_size, action_dim)
+        q_tensor = q_tensor.permute(1, 0, 2) # Shape: (batch_size, 6, action_dim)
+        weights_reshaped = w.view(-1, 1, 6) # Shape: (batch_size, 1, 6)
+        combined_q = torch.bmm(weights_reshaped, q_tensor).squeeze(1) # Shape: (batch_size, action_dim)
         
         return combined_q
 
@@ -326,6 +331,9 @@ class DQN(object):
 
 
     def train(self):
+        print("Starting training...")
+        total_training_start_time = time.time()
+
         epoch_return_rate_train_list = []
         epoch_final_balance_train_list = []
         epoch_required_money_train_list = []
@@ -337,6 +345,7 @@ class DQN(object):
         best_model = None
         self.replay_buffer = ReplayBuffer_High(args, self.n_state_1, self.n_state_2, self.n_action) 
         for sample in range(self.epoch_number):
+            epoch_start_time = time.time()
             print('epoch ', epoch_counter + 1)
             self.df = pd.read_feather(
                 os.path.join(self.train_data_path, "train.feather"))
@@ -481,6 +490,14 @@ class DQN(object):
         final_result_path = os.path.join("./result/high_level", '{}'.format(self.dataset))
         self.test_cluster(best_model_path, final_result_path)
 
+        total_training_end_time = time.time()
+        total_training_duration = total_training_end_time - total_training_start_time
+        print(f"Total training finished. Total duration: {total_training_duration:.2f} seconds")
+        self.writer.add_scalar(
+            tag="total_training_duration_seconds",
+            scalar_value=total_training_duration,
+            global_step=epoch_counter
+        )
 
     def val_cluster(self, model_path, save_path):
         self.hyperagent.load_state_dict(
@@ -536,6 +553,15 @@ class DQN(object):
         np.save(os.path.join(save_path, "commission_fee_history_val.npy"),
                 commission_fee_list)
         return_rate = final_balance / required_money
+
+        epoch_duration = time.time() - epoch_start_time
+        print(f"Epoch {epoch_counter} finished. Duration: {epoch_duration:.2f} seconds")
+        self.writer.add_scalar(
+            tag="epoch_duration_seconds",
+            scalar_value=epoch_duration,
+            global_step=epoch_counter
+        )
+
         return return_rate
 
     def test_cluster(self, epoch_path, save_path):
