@@ -567,7 +567,7 @@ class DQN(object):
 
     def test_cluster(self, epoch_path, save_path):
         self.hyperagent.load_state_dict(
-            torch.load(os.path.join(epoch_path, "trained_model.pkl")))
+            torch.load(epoch_path))
         self.hyperagent.eval()
         counter = False
         action_list = []
