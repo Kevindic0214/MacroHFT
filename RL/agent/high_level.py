@@ -47,13 +47,14 @@ parser.add_argument("--transcation_cost",type=float,default=0.2 / 1000)
 parser.add_argument("--back_time_length",type=int,default=1)
 parser.add_argument("--seed",type=int,default=12345)
 parser.add_argument("--n_step",type=int,default=1)
-parser.add_argument("--epoch_number",type=int,default=8)
+parser.add_argument("--epoch_number",type=int,default=5)
 parser.add_argument("--device",type=str,default="cuda:0")
 parser.add_argument("--alpha",type=float,default=0.5)
-parser.add_argument("--beta",type=int,default=5)
+parser.add_argument("--beta",type=float,default=5.0)
 parser.add_argument("--exp",type=str,default="exp1")
 parser.add_argument("--num_step",type=int,default=10)
 parser.add_argument("--num_quantiles", type=int, default=51)
+parser.add_argument("--hyperagent_hidden_dim", type=int, default=32)
 
 
 def seed_torch(seed):
@@ -167,13 +168,12 @@ class DQN(object):
             1: self.vol_2,
             2: self.vol_3
         }
-        self.hyperagent = hyperagent(self.n_state_1, self.n_state_2, self.n_action, 32).to(self.device)
-        self.hyperagent_target = hyperagent(self.n_state_1, self.n_state_2, self.n_action, 32).to(self.device)
+        self.hyperagent = hyperagent(self.n_state_1, self.n_state_2, self.n_action, args.hyperagent_hidden_dim).to(self.device)
+        self.hyperagent_target = hyperagent(self.n_state_1, self.n_state_2, self.n_action, args.hyperagent_hidden_dim).to(self.device)
         self.hyperagent_target.load_state_dict(self.hyperagent.state_dict())
         self.update_times = args.update_times
         self.optimizer = torch.optim.Adam(self.hyperagent.parameters(),
                                           lr=args.lr)
-        self.loss_func = nn.MSELoss()
         self.batch_size = args.batch_size
         self.gamma = args.gamma
         self.tau = args.tau
@@ -188,28 +188,46 @@ class DQN(object):
         self.memory = episodicmemory(4320, 5, self.n_state_1, self.n_state_2, 64, self.device)
         self.args = args
 
-    def calculate_q(self, w, qs):
-        # qs is a list of tensors, each with shape (batch_size, action_dim, num_quantiles)
-        # We need to take the mean over the quantiles dimension to get Q-values
-        qs_mean = [q.mean(dim=2) for q in qs] # Calculate mean over num_quantiles
-        q_tensor = torch.stack(qs_mean) # Shape: (6, batch_size, action_dim)
-        q_tensor = q_tensor.permute(1, 0, 2) # Shape: (batch_size, 6, action_dim)
-        weights_reshaped = w.view(-1, 1, 6) # Shape: (batch_size, 1, 6)
-        combined_q = torch.bmm(weights_reshaped, q_tensor).squeeze(1) # Shape: (batch_size, action_dim)
+        # QR-DQN specific parameters for high-level agent
+        self.num_quantiles = self.args.num_quantiles # Assumes num_quantiles is in args
+        self.kappa = getattr(self.args, 'kappa', 1.0) # Use args.kappa if available, else default to 1.0
         
-        return combined_q
+        # Precompute tau values for quantile midpoints
+        self.tau_values = (
+            torch.arange(self.num_quantiles, device=self.device, dtype=torch.float32) + 0.5
+        ) / self.num_quantiles
+        
+        # Ensure alpha and beta for loss components are attributes of the class
+        self.alpha = args.alpha # for memory_error weight
+        self.beta = args.beta # for KL_loss weight
 
+    def calculate_q_distribution(self, w, qs_distributions):
+        # qs_distributions is a list of tensors, each shape (batch_size, action_dim, num_quantiles)
+        # w (weights from hyperagent) has shape (batch_size, 6)
+        
+        stacked_qs_distributions = torch.stack(qs_distributions) # Shape: (6, batch_size, action_dim, num_quantiles)
+        # Permute to (batch_size, 6, action_dim, num_quantiles)
+        stacked_qs_distributions = stacked_qs_distributions.permute(1, 0, 2, 3) 
+        
+        # Reshape weights for broadcasting: (batch_size, 6) -> (batch_size, 6, 1, 1)
+        weights_reshaped = w.view(-1, stacked_qs_distributions.size(1), 1, 1) 
+        
+        # Weighted sum of distributions
+        # Output shape: (batch_size, action_dim, num_quantiles)
+        combined_q_dist = torch.sum(weights_reshaped * stacked_qs_distributions, dim=1)
+        return combined_q_dist
 
     def update(self, replay_buffer):
         batch, _, _ = replay_buffer.sample()
         batch = {k: v.to(self.device) for k, v in batch.items()}
         
         w_current = self.hyperagent(batch['state'], batch['state_trend'], batch['state_clf'], batch['previous_action'])
-        w_next = self.hyperagent_target(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
-        w_next_ = self.hyperagent(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
+        
+        with torch.no_grad():
+            w_next_target = self.hyperagent_target(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
+            w_next_eval = self.hyperagent(batch['next_state'], batch['next_state_trend'], batch['next_state_clf'], batch['next_previous_action'])
 
-
-        qs_current = [
+        qs_current_distributions = [
                     self.slope_agents[0](batch['state'], batch['state_trend'], batch['previous_action']),
                     self.slope_agents[1](batch['state'], batch['state_trend'], batch['previous_action']),
                     self.slope_agents[2](batch['state'], batch['state_trend'], batch['previous_action']),
@@ -217,7 +235,7 @@ class DQN(object):
                     self.vol_agents[1](batch['state'], batch['state_trend'], batch['previous_action']),
                     self.vol_agents[2](batch['state'], batch['state_trend'], batch['previous_action'])
         ]
-        qs_next = [
+        qs_next_distributions = [
                     self.slope_agents[0](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
                     self.slope_agents[1](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
                     self.slope_agents[2](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
@@ -225,23 +243,85 @@ class DQN(object):
                     self.vol_agents[1](batch['next_state'], batch['next_state_trend'], batch['next_previous_action']),
                     self.vol_agents[2](batch['next_state'], batch['next_state_trend'], batch['next_previous_action'])
         ]
-        q_distribution = self.calculate_q(w_current, qs_current)
-        q_current = q_distribution.gather(-1, batch['action']).squeeze(-1)
-        a_argmax = self.calculate_q(w_next_, qs_next).argmax(dim=-1, keepdim=True)
-        q_nexts = self.calculate_q(w_next, qs_next)
-        q_target = batch['reward'] + self.gamma * (1 - batch['terminal']) * q_nexts.gather(-1, a_argmax).squeeze(-1)
+        
+        # Get current Q-distribution for all actions
+        q_dist_current_all_actions = self.calculate_q_distribution(w_current, qs_current_distributions)
+        
+        # Gather the Q-distribution for the actions taken
+        action_batch = batch['action'].long() # Shape: (batch_size, 1)
+        # Expand action_batch to gather across num_quantiles: (batch_size, 1, num_quantiles)
+        action_batch_expanded = action_batch.unsqueeze(-1).expand(-1, -1, self.num_quantiles)
+        current_z = q_dist_current_all_actions.gather(1, action_batch_expanded).squeeze(1) # Shape: (batch_size, num_quantiles)
 
-        td_error = self.loss_func(q_current, q_target)
-        memory_error = self.loss_func(q_current, batch['q_memory'])
+        with torch.no_grad():
+            # Select next actions using eval_net (mean of quantiles from combined distribution)
+            q_dist_next_all_actions_eval = self.calculate_q_distribution(w_next_eval, qs_next_distributions)
+            q_values_next_for_action_selection = q_dist_next_all_actions_eval.mean(dim=2) # Shape: (batch_size, action_dim)
+            a_argmax = q_values_next_for_action_selection.argmax(dim=-1, keepdim=True) # Shape: (batch_size, 1)
+
+            # Get next state quantiles from target_net's combined distribution for the selected actions
+            q_dist_next_all_actions_target = self.calculate_q_distribution(w_next_target, qs_next_distributions)
+            # Expand a_argmax to gather across num_quantiles: (batch_size, 1, num_quantiles)
+            a_argmax_expanded = a_argmax.unsqueeze(-1).expand(-1, -1, self.num_quantiles)
+            next_best_quantiles = q_dist_next_all_actions_target.gather(1, a_argmax_expanded).squeeze(1) # Shape: (batch_size, num_quantiles)
+
+            # Compute target quantile values (Bellman update for quantiles)
+            target_z = (
+                batch["reward"].unsqueeze(-1)
+                + self.gamma
+                * (1 - batch["terminal"].unsqueeze(-1))
+                * next_best_quantiles
+            ) # Shape: (batch_size, num_quantiles)
+
+        # Compute Quantile Huber Loss for TD error
+        delta_ij = target_z.unsqueeze(1) - current_z.unsqueeze(2) 
+        abs_delta_ij = torch.abs(delta_ij)
+        huber_loss_values = torch.where(
+            abs_delta_ij <= self.kappa,
+            0.5 * delta_ij.pow(2),
+            self.kappa * (abs_delta_ij - 0.5 * self.kappa),
+        )
+        
+        # self.tau_values is tau_i (for current quantiles from current_z)
+        # Shape: (num_quantiles,) -> Unsqueeze to (1, num_quantiles, 1) for broadcasting against delta_ij
+        tau_i_expanded = self.tau_values.unsqueeze(0).unsqueeze(-1) # tau for current_z's quantiles
+
+        # Pairwise quantile loss: |tau_i - I(delta_ij < 0)| * huber_loss
+        # Sum over target quantiles (dim 2), mean over current quantiles (dim 1), mean over batch
+        # This is slightly different from typical IQN/FQF, which would be:
+        # (torch.abs(self.tau_values.unsqueeze(0).unsqueeze(-1) - (delta_ij < 0).float()) * huber_loss_values).mean(dim=2).sum(dim=1).mean()
+        # Let's stick to the FQF paper's formulation: sum over j (target quantiles), mean over i (current quantiles)
+        # Or more simply, as in the provided low_level agent:
+        # sum over current quantiles (dim 1 here, as tau_i_expanded aligns with current_z's quantiles)
+        # mean over target quantiles (dim 2 here)
+        quantile_huber_loss_pairwise = (
+            torch.abs(tau_i_expanded - (delta_ij < 0).float()) * huber_loss_values
+        )
+        td_error = quantile_huber_loss_pairwise.sum(dim=2).mean(dim=1).mean() # Sum over target_z's quantiles, mean over current_z's quantiles
+
+        # Memory error calculation (comparing mean of current_z with q_memory)
+        q_current_mean_for_memory = current_z.mean(dim=1) # Mean of current quantiles
+        q_memory_from_batch = batch['q_memory']
+        
+        q_memory_valid_mask = ~torch.isnan(q_memory_from_batch)
+        
+        if q_memory_valid_mask.any():
+            valid_q_current_mean = q_current_mean_for_memory[q_memory_valid_mask]
+            valid_q_memory = q_memory_from_batch[q_memory_valid_mask]
+            memory_error_val = F.mse_loss(valid_q_current_mean, valid_q_memory)
+        else:
+            memory_error_val = torch.tensor(0.0, device=self.device)
 
         demonstration = batch['demo_action']
+        # KL_loss calculation uses mean of Q-distribution for softmax
+        q_values_for_kl = q_dist_current_all_actions.mean(dim=2) # Shape: (batch_size, action_dim)
         KL_loss = F.kl_div(
-            (q_distribution.softmax(dim=-1) + 1e-8).log(),
-            (demonstration.softmax(dim=-1) + 1e-8),
+            (q_values_for_kl.softmax(dim=-1) + 1e-8).log(),
+            (demonstration.softmax(dim=-1) + 1e-8), 
             reduction="batchmean",
         )
 
-        loss = td_error + args.alpha * memory_error + args.beta * KL_loss
+        loss = td_error + self.alpha * memory_error_val + self.beta * KL_loss
         self.optimizer.zero_grad()
         loss.backward()
 
@@ -250,7 +330,7 @@ class DQN(object):
         for param, target_param in zip(self.hyperagent.parameters(), self.hyperagent_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
         self.update_counter += 1
-        return td_error.cpu(), memory_error.cpu(), KL_loss.cpu(), torch.mean(q_current.cpu()), torch.mean(q_target.cpu())
+        return td_error.cpu(), memory_error_val.cpu(), KL_loss.cpu(), q_current_mean_for_memory.mean().cpu(), target_z.mean().cpu() # Return mean of target_z quantiles
 
     def act(self, state, state_trend, state_clf, info):
         x1 = torch.FloatTensor(state).to(self.device)
@@ -260,18 +340,24 @@ class DQN(object):
             torch.tensor(info["previous_action"]).long().to(self.device),
             0).to(self.device)
         if np.random.uniform() < (1-self.epsilon):
-            qs = [
-                    self.slope_agents[0](x1, x2, previous_action),
-                    self.slope_agents[1](x1, x2, previous_action),
-                    self.slope_agents[2](x1, x2, previous_action),
-                    self.vol_agents[0](x1, x2, previous_action),
-                    self.vol_agents[1](x1, x2, previous_action),
-                    self.vol_agents[2](x1, x2, previous_action)
-            ]
-            w = self.hyperagent(x1, x2, x3, previous_action)
-            actions_value = self.calculate_q(w, qs)
-            action = torch.max(actions_value, 1)[1].data.cpu().numpy()
-            action = action[0]
+            with torch.no_grad(): # Added no_grad for inference
+                qs_distributions = [
+                        self.slope_agents[0](x1, x2, previous_action),
+                        self.slope_agents[1](x1, x2, previous_action),
+                        self.slope_agents[2](x1, x2, previous_action),
+                        self.vol_agents[0](x1, x2, previous_action),
+                        self.vol_agents[1](x1, x2, previous_action),
+                        self.vol_agents[2](x1, x2, previous_action)
+                ]
+                w = self.hyperagent(x1, x2, x3, previous_action)
+                
+                # Get combined Q-distribution
+                combined_q_dist = self.calculate_q_distribution(w, qs_distributions)
+                # Take mean over quantiles to get Q-values for action selection
+                actions_value = combined_q_dist.mean(dim=2) # Shape: (batch_size, action_dim)
+                
+                action = torch.max(actions_value, 1)[1].data.cpu().numpy()
+                action = action[0]
         else:
             action_choice = [0,1]
             action = random.choice(action_choice)
@@ -285,7 +371,7 @@ class DQN(object):
             previous_action = torch.unsqueeze(
                 torch.tensor(info["previous_action"]).long().to(self.device),
                 0).to(self.device)
-            qs = [
+            qs_distributions = [
                     self.slope_agents[0](x1, x2, previous_action),
                     self.slope_agents[1](x1, x2, previous_action),
                     self.slope_agents[2](x1, x2, previous_action),
@@ -294,31 +380,41 @@ class DQN(object):
                     self.vol_agents[2](x1, x2, previous_action)
             ]
             w = self.hyperagent(x1, x2, x3, previous_action)
-            actions_value = self.calculate_q(w, qs)
+
+            # Get combined Q-distribution
+            combined_q_dist = self.calculate_q_distribution(w, qs_distributions)
+            # Take mean over quantiles to get Q-values for action selection
+            actions_value = combined_q_dist.mean(dim=2) # Shape: (batch_size, action_dim)
+
             action = torch.max(actions_value, 1)[1].data.cpu().numpy()
             action = action[0]
             return action
 
     def q_estimate(self, state, state_trend, state_clf, info):
-        x1 = torch.FloatTensor(state).to(self.device)
-        x2 = torch.FloatTensor(state_trend).to(self.device)
-        x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
-        previous_action = torch.unsqueeze(
-            torch.tensor(info["previous_action"]).long().to(self.device),
-            0).to(self.device)
-        qs = [
+        with torch.no_grad():
+            x1 = torch.FloatTensor(state).to(self.device)
+            x2 = torch.FloatTensor(state_trend).to(self.device)
+            x3 = torch.FloatTensor(state_clf).unsqueeze(0).to(self.device)
+            previous_action = torch.unsqueeze(
+                torch.tensor(info["previous_action"]).long().to(self.device),
+                0).to(self.device)
+            qs_distributions = [
                 self.slope_agents[0](x1, x2, previous_action),
                 self.slope_agents[1](x1, x2, previous_action),
                 self.slope_agents[2](x1, x2, previous_action),
                 self.vol_agents[0](x1, x2, previous_action),
                 self.vol_agents[1](x1, x2, previous_action),
                 self.vol_agents[2](x1, x2, previous_action)
-        ]
-        w = self.hyperagent(x1, x2, x3, previous_action)
-        actions_value = self.calculate_q(w, qs)
-        q = torch.max(actions_value, 1)[0].detach().cpu().numpy()
-        
-        return q
+            ]
+            w = self.hyperagent(x1, x2, x3, previous_action)
+            combined_q_dist = self.calculate_q_distribution(w, qs_distributions)
+            # For q_estimate, typically we want the Q-value of the chosen action, or all Q-values.
+            # Returning the mean Q-values for all actions.
+            actions_value = combined_q_dist.mean(dim=2) 
+            q = torch.max(actions_value, 1)[0].detach().cpu().numpy() # Q-value of the best action
+            # If you need all Q-values:
+            # q_all_actions = actions_value.squeeze(0).detach().cpu().numpy() 
+            return q
 
     def calculate_hidden(self, state, state_trend, info):
         x1 = torch.FloatTensor(state).to(self.device)
