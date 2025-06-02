@@ -1,0 +1,108 @@
+找到新的最佳模型: Epoch 2 with return rate 0.1061                                                  
+Epoch 3 驗證結果: Final Balance: 11.30, Required Money: 386.51, Return Rate: 0.0292                
+Epoch 4 驗證結果: Final Balance: 62.10, Required Money: 328.20, Return Rate: 0.1892                
+找到新的最佳模型: Epoch 4 with return rate 0.1892                                                  
+Epoch 5 驗證結果: Final Balance: 90.06, Required Money: 325.30, Return Rate: 0.2768                
+找到新的最佳模型: Epoch 5 with return rate 0.2768                                                  
+Epoch 6 驗證結果: Final Balance: 75.90, Required Money: 322.69, Return Rate: 0.2352                
+Epoch 7 驗證結果: Final Balance: 15.22, Required Money: 378.64, Return Rate: 0.0402                
+評估 Epochs: 100%|██████████████████████████████████████████████| 7/7 [00:00<00:00, 2270.00epoch/s]
+
+模型選擇完成，耗時: 0.05 秒
+
+最佳模型: Epoch 5, 驗證回報率: 0.2768
+最佳模型已儲存到: /nfs/RS2416RP/Workspace/kevin/chuchu/MacroHFT/result/high_level/ETHUSDT/exp1/seed_12345/best_model.pkl (耗時: 0.01 秒)
+
+使用最佳模型生成測試結果...
+正在載入模型和資料...
+載入子代理模型...
+載入 Slope Agents:   0%|                                                     | 0/3 [00:00<?, ?it/s]Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+載入 Slope Agents:  33%|███████████████                              | 1/3 [00:00<00:00,  3.86it/s]Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+載入超代理模型...                                                                                  
+Patch fine: kernel=2, stride=1, output_patches=19
+Patch medium: kernel=4, stride=2, output_patches=9
+Patch coarse: kernel=8, stride=4, output_patches=4
+Patch irregular: kernel=5, stride=3, output_patches=6
+Total patches: 38
+模型載入完成，耗時: 0.47 秒
+載入測試資料...
+測試資料載入完成，資料長度: 219960, 耗時: 0.16 秒
+初始化測試環境...
+測試環境初始化完成，耗時: 0.00 秒
+開始運行測試...
+測試進行中: 100%|█████████████████████████████████████▉| 219900/219940 [1:05:19<00:00, 56.11step/s]the portfit margine is  -0.1452233291727255
+測試進行中: 100%|██████████████████████████████████████| 219940/219940 [1:05:24<00:00, 56.04step/s]
+測試運行完成，總步數: 219940, 耗時: 3924.75 秒
+平均每步耗時: 17.84 毫秒
+計算最終結果...
+結果計算完成，耗時: 4.91 秒
+儲存結果檔案...
+儲存 .npy 檔案到: /nfs/RS2416RP/Workspace/kevin/chuchu/MacroHFT/result/high_level/ETHUSDT
+檔案儲存完成，耗時: 9.66 秒
+
+=== 測試結果 ===
+Final Balance: -425.57
+Required Money: 431.33
+Commission Fee: 5.47
+測試回報率: -0.9866
+測試完成，耗時: 3939.97 秒
+
+總執行時間: 3940.03 秒
