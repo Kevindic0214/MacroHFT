@@ -86,6 +86,7 @@ class Testing_Env(gym.Env):
         self.sell_money_memory.append(0)
         return self.single_state, self.trend_state, {
             "previous_action": self.initial_action,
+            "q_value": np.zeros(2),  # Default q_value for Testing_Env
         }
 
     def step(self, action):
@@ -157,6 +158,7 @@ class Testing_Env(gym.Env):
 
         return self.single_state, self.trend_state, self.reward, self.terminal, {
             "previous_action": action,
+            "q_value": np.zeros(2),  # Default q_value for Testing_Env
         }
 
     def get_final_return_rate(self, slient=False):

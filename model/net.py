@@ -39,6 +39,17 @@ class subagent(nn.Module):
         )
 
         self.register_buffer("max_punish", torch.tensor(max_punish))
+        
+        # Initialize weights for better training stability
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize network weights for better training stability"""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.orthogonal_(module.weight, gain=0.01)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
 
     def forward(
         self,

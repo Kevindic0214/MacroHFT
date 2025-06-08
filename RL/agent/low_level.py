@@ -274,10 +274,7 @@ class DQN(object):
         # current_z has N_current quantiles (self.num_quantiles)
         delta_ij = target_z.unsqueeze(1) - current_z.unsqueeze(2)
         # delta_ij shape: (batch_size, N_eval, N_target)
-        # target_z.unsqueeze(1): (B, 1, N_target)
-        # current_z.unsqueeze(2): (B, N_eval, 1)
-        # So delta_ij becomes (B, N_eval, N_target)
-
+        
         abs_delta_ij = torch.abs(delta_ij)
         huber_loss_values = torch.where(
             abs_delta_ij <= self.kappa,
@@ -286,18 +283,19 @@ class DQN(object):
         )
 
         # self.tau_values is tau_i (for current quantiles)
-        # Shape: (N_eval_quantiles,)
-        tau_i = self.tau_values.unsqueeze(0).unsqueeze(
-            -1
-        )
+        # Shape: (N_eval_quantiles,) -> reshape to (1, N_eval, 1) for broadcasting
+        tau_i = self.tau_values.unsqueeze(0).unsqueeze(-1)
 
         # Pairwise quantile loss: |tau_i - I(delta_ij < 0)| * huber_loss
         quantile_huber_loss_pairwise = (
             torch.abs(tau_i - (delta_ij < 0).float()) * huber_loss_values
         )
 
-        # Sum over current quantiles (dim 1 refers to N_eval), mean over target quantiles (dim 2 refers to N_target), mean over batch
-        quantile_regression_loss = quantile_huber_loss_pairwise.sum(dim=1).mean(dim=1).mean()
+        # Average over target quantiles (dim 2), sum over current quantiles (dim 1), mean over batch
+        quantile_regression_loss = quantile_huber_loss_pairwise.mean(dim=2).sum(dim=1).mean()
+
+        # Clamp the loss to prevent numerical instability
+        quantile_regression_loss = torch.clamp(quantile_regression_loss, max=100.0)
 
         # KL divergence for imitation learning (optional)
         # Use mean of quantiles for Q-values in KL divergence
@@ -331,7 +329,18 @@ class DQN(object):
         self.optimizer.zero_grad()
         loss.backward()
 
-        torch.nn.utils.clip_grad_norm_(self.eval_net.parameters(), 1)
+        # Add gradient monitoring for debugging
+        total_grad_norm = torch.nn.utils.clip_grad_norm_(self.eval_net.parameters(), 1)
+        
+        # Log gradient information occasionally
+        if self.update_counter % (self.q_value_memorize_freq * 10) == 1:
+            self.writer.add_scalar(
+                tag="gradient_norm",
+                scalar_value=total_grad_norm,
+                global_step=self.update_counter,
+                walltime=None,
+            )
+        
         self.optimizer.step()
         for param, target_param in zip(
             self.eval_net.parameters(), self.target_net.parameters()
@@ -360,6 +369,11 @@ class DQN(object):
     def act(self, state, state_trend, info):
         x1 = torch.FloatTensor(state).to(self.device)
         x2 = torch.FloatTensor(state_trend).to(self.device)
+        
+        # Normalize states to prevent numerical issues
+        x1 = torch.nan_to_num(x1, nan=0.0, posinf=1e6, neginf=-1e6)
+        x2 = torch.nan_to_num(x2, nan=0.0, posinf=1e6, neginf=-1e6)
+        
         previous_action = torch.unsqueeze(
             torch.tensor(info["previous_action"]).long().to(self.device),
             0,
@@ -373,8 +387,15 @@ class DQN(object):
             actions_value = actions_value_quantiles.mean(
                 dim=2
             )
-            action = torch.max(actions_value, 1)[1].data.cpu().numpy()
-            action = action[0]
+            
+            # Check for NaN or Inf values and handle gracefully
+            if torch.isnan(actions_value).any() or torch.isinf(actions_value).any():
+                print("Warning: NaN or Inf detected in Q-values, using random action")
+                action_choice = [0, 1]
+                action = random.choice(action_choice)
+            else:
+                action = torch.max(actions_value, 1)[1].data.cpu().numpy()
+                action = action[0]
         else:
             action_choice = [0, 1]
             action = random.choice(action_choice)
@@ -383,6 +404,11 @@ class DQN(object):
     def act_test(self, state, state_trend, info):
         x1 = torch.FloatTensor(state).to(self.device)
         x2 = torch.FloatTensor(state_trend).to(self.device)
+        
+        # Normalize states to prevent numerical issues
+        x1 = torch.nan_to_num(x1, nan=0.0, posinf=1e6, neginf=-1e6)
+        x2 = torch.nan_to_num(x2, nan=0.0, posinf=1e6, neginf=-1e6)
+        
         previous_action = torch.unsqueeze(
             torch.tensor(info["previous_action"]).long(), 0
         ).to(self.device)
@@ -531,7 +557,7 @@ class DQN(object):
                 epoch_reward_sum_train_list.append(episode_reward_sum)
 
             epoch_counter += 1
-            self.epsilon = self.epsilon_scheduler.get_epsilon(epoch_counter)
+            self.epsilon = self.epsilon_scheduler.get_epsilon(step_counter)
             mean_return_rate_train = np.mean(epoch_return_rate_train_list) if epoch_return_rate_train_list else 0
             mean_final_balance_train = np.mean(epoch_final_balance_train_list)
             mean_required_money_train = np.mean(epoch_required_money_train_list)
@@ -596,6 +622,11 @@ class DQN(object):
             torch.load(os.path.join(epoch_path, "trained_model.pkl"), map_location=self.device)
         )
         self.eval_net.eval()
+        
+        # Save current epsilon and set to 0 for deterministic validation
+        original_epsilon = self.epsilon
+        self.epsilon = 0.0
+        
         df_list = self.val_index[self.label]
         df_number = int(len(df_list))
         action_list = []
@@ -603,6 +634,7 @@ class DQN(object):
         final_balance_list = []
         required_money_list = []
         commission_fee_list = []
+        return_rate_list = []
         for i in range(df_number):
             print("validating on df", df_list[i])
             self.df = pd.read_feather(
@@ -638,6 +670,7 @@ class DQN(object):
             final_balance_list.append(final_balance)
             required_money_list.append(required_money)
             commission_fee_list.append(commission_fee)
+            return_rate_list.append(final_balance / required_money if required_money != 0 else 0)
         action_list = np.array(action_list, dtype=object)
         reward_list = np.array(reward_list, dtype=object)
         final_balance_list = np.array(final_balance_list)
@@ -680,7 +713,10 @@ class DQN(object):
             ),
             return_rate_mean,
         )
-        return return_rate_mean
+        # Restore original epsilon
+        self.epsilon = original_epsilon
+        
+        return np.mean(return_rate_list) if return_rate_list else 0
 
 
 if __name__ == "__main__":

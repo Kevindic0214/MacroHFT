@@ -284,20 +284,17 @@ class DQN(object):
         
         # self.tau_values is tau_i (for current quantiles from current_z)
         # Shape: (num_quantiles,) -> Unsqueeze to (1, num_quantiles, 1) for broadcasting against delta_ij
-        tau_i_expanded = self.tau_values.unsqueeze(0).unsqueeze(-1) # tau for current_z's quantiles
+        tau_i_expanded = self.tau_values.unsqueeze(0).unsqueeze(-1)
 
         # Pairwise quantile loss: |tau_i - I(delta_ij < 0)| * huber_loss
-        # Sum over target quantiles (dim 2), mean over current quantiles (dim 1), mean over batch
-        # This is slightly different from typical IQN/FQF, which would be:
-        # (torch.abs(self.tau_values.unsqueeze(0).unsqueeze(-1) - (delta_ij < 0).float()) * huber_loss_values).mean(dim=2).sum(dim=1).mean()
-        # Let's stick to the FQF paper's formulation: sum over j (target quantiles), mean over i (current quantiles)
-        # Or more simply, as in the provided low_level agent:
-        # sum over current quantiles (dim 1 here, as tau_i_expanded aligns with current_z's quantiles)
-        # mean over target quantiles (dim 2 here)
         quantile_huber_loss_pairwise = (
             torch.abs(tau_i_expanded - (delta_ij < 0).float()) * huber_loss_values
         )
-        td_error = quantile_huber_loss_pairwise.sum(dim=2).mean(dim=1).mean() # Sum over target_z's quantiles, mean over current_z's quantiles
+        # Average over target quantiles (dim 2), sum over current quantiles (dim 1), mean over batch
+        td_error = quantile_huber_loss_pairwise.mean(dim=2).sum(dim=1).mean()
+
+        # Clamp the td_error to prevent numerical instability
+        td_error = torch.clamp(td_error, max=100.0)
 
         # Memory error calculation (comparing mean of current_z with q_memory)
         q_current_mean_for_memory = current_z.mean(dim=1) # Mean of current quantiles
