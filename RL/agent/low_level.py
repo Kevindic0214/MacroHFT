@@ -84,6 +84,11 @@ class DQN(object):
         self.support = torch.linspace(self.v_min, self.v_max, self.num_atoms).to(self.device)
         self.delta_z = (self.v_max - self.v_min) / (self.num_atoms - 1)
 
+        # Multi-step learning parameters
+        self.n_step = args.n_step
+        self.multi_step_buffer = []  # For storing n-step transitions
+        self.gamma = args.gamma
+
         self.result_path = os.path.join("./result/low_level", 
                                         '{}'.format(args.dataset), '{}.{}'.format(args.clf, "C51"), str(float(args.alpha)), args.label) # Use float for alpha in path
         self.label = int(args.label.split('_')[1])
@@ -144,15 +149,14 @@ class DQN(object):
         self.n_state_1 = len(self.tech_indicator_list)
         self.n_state_2 = len(self.tech_indicator_list_trend)
         self.eval_net, self.target_net = subagent(
-            self.n_state_1, self.n_state_2, self.n_action, 64, self.num_atoms, self.v_min, self.v_max).to(self.device), subagent(
+            self.n_state_1, self.n_state_2, self.n_action, 64, self.num_atoms, self.v_min, self.v_max, use_noisy=True).to(self.device), subagent(
                 self.n_state_1, self.n_state_2, self.n_action,
-                64, self.num_atoms, self.v_min, self.v_max).to(self.device)
+                64, self.num_atoms, self.v_min, self.v_max, use_noisy=True).to(self.device)
         self.hardupdate()
         self.update_times = args.update_times
         self.optimizer = torch.optim.Adam(self.eval_net.parameters(),
                                           lr=args.lr)
         self.batch_size = args.batch_size
-        self.gamma = args.gamma
         self.tau = args.tau
         self.n_step = args.n_step
         self.eval_update_freq = args.eval_update_freq
@@ -206,11 +210,14 @@ class DQN(object):
             next_best_actions_expanded = next_best_actions.unsqueeze(1).unsqueeze(2).expand(-1, -1, self.num_atoms)
             next_q_dist_target_action = q_dist_next.gather(1, next_best_actions_expanded).squeeze(1) # (batch_size, num_atoms)
 
-            # Compute target distribution projection
+            # Compute target distribution projection with n-step discount
             rewards = batch['reward'].unsqueeze(1) 
             terminals = batch['terminal'].unsqueeze(1)
             
-            Tz = rewards + (1 - terminals) * self.gamma * self.support.unsqueeze(0) # (batch_size, num_atoms)
+            # Use n-step discount factor
+            gamma_n = self.gamma ** self.n_step
+            
+            Tz = rewards + (1 - terminals) * gamma_n * self.support.unsqueeze(0) # (batch_size, num_atoms)
             Tz = Tz.clamp(min=self.v_min, max=self.v_max)
 
             b = (Tz - self.v_min) / self.delta_z # (batch_size, num_atoms)
@@ -307,12 +314,20 @@ class DQN(object):
     def hardupdate(self):
         self.target_net.load_state_dict(self.eval_net.state_dict())
 
+    def reset_noise(self):
+        """Reset noise in noisy networks"""
+        self.eval_net.reset_noise()
+        self.target_net.reset_noise()
+
     def act(self, state, state_trend, info):
         x1 = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         x2 = torch.FloatTensor(state_trend).unsqueeze(0).to(self.device)
         previous_action = torch.tensor([info["previous_action"]], dtype=torch.long).to(self.device)
         
-        if np.random.uniform() < (1-self.epsilon):
+        # With noisy networks, we can reduce epsilon-greedy exploration
+        epsilon_threshold = self.epsilon if not hasattr(self.eval_net, 'use_noisy') or not self.eval_net.use_noisy else self.epsilon * 0.1
+        
+        if np.random.uniform() < (1 - epsilon_threshold):
             self.eval_net.eval()
             with torch.no_grad():
                 q_logits = self.eval_net(x1, x2, previous_action)
@@ -382,10 +397,13 @@ class DQN(object):
                 s, s2, info = train_env.reset()
                 episode_reward_sum = 0
                 
+                # Reset noise at the beginning of each episode for better exploration
+                self.reset_noise()
+                
                 while True:
                     a = self.act(s, s2, info)
                     s_, s2_, r, done, info_ = train_env.step(a)
-                    self.replay_buffer.store_transition(s, s2, info['previous_action'], info['q_value'], a, r, s_, s2_, info_['previous_action'],
+                    self.store_transition_with_nstep(s, s2, info['previous_action'], info['q_value'], a, r, s_, s2_, info_['previous_action'],
                                     info_['q_value'], done)
                     episode_reward_sum += r
 
@@ -393,6 +411,8 @@ class DQN(object):
                     step_counter += 1
                     if step_counter % self.eval_update_freq == 0 and step_counter > (
                             self.batch_size + self.n_step):
+                        # Reset noise before training updates for better gradient estimates
+                        self.reset_noise()
                         for i in range(self.update_times):
                             td_error, KL_loss, q_eval, q_target = self.update(self.replay_buffer)
                             if self.update_counter % self.q_value_memorize_freq == 1:
@@ -563,9 +583,114 @@ class DQN(object):
         np.save(os.path.join(save_path, "return_rate_mean_val_{}.npy".format(initial_action)),
                 return_rate_mean)
         return return_rate_mean
+
+    def compute_n_step_returns(self, batch_size):
+        """Compute n-step returns for current batch"""
+        if self.n_step == 1:
+            return None  # Use regular 1-step returns
         
+        n_step_returns = []
+        n_step_states = []
+        n_step_dones = []
         
+        for i in range(batch_size):
+            if len(self.multi_step_buffer) >= self.n_step:
+                # Calculate n-step return
+                n_step_return = 0
+                state_idx = max(0, len(self.multi_step_buffer) - self.n_step)
+                
+                for j in range(self.n_step):
+                    if state_idx + j < len(self.multi_step_buffer):
+                        transition = self.multi_step_buffer[state_idx + j]
+                        reward = transition['reward']
+                        done = transition['done']
+                        
+                        n_step_return += (self.gamma ** j) * reward
+                        
+                        if done:
+                            n_step_states.append(transition['next_state'])
+                            n_step_dones.append(True)
+                            break
+                    
+                if not done and state_idx + self.n_step - 1 < len(self.multi_step_buffer):
+                    # If episode didn't end, use next state after n steps
+                    final_transition = self.multi_step_buffer[state_idx + self.n_step - 1]
+                    n_step_states.append(final_transition['next_state'])
+                    n_step_dones.append(False)
+                
+                n_step_returns.append(n_step_return)
+            else:
+                n_step_returns.append(0)  # Not enough steps yet
+                n_step_states.append(None)
+                n_step_dones.append(False)
+        
+        return {
+            'n_step_returns': n_step_returns,
+            'n_step_states': n_step_states,
+            'n_step_dones': n_step_dones
+        }
+
+    def store_transition_with_nstep(self, state, state_trend, previous_action, teacher_q_values, 
+                                   action, reward, next_state, next_state_trend, next_previous_action, 
+                                   next_teacher_q_values, terminal):
+        """Store transition with n-step learning support"""
+        transition = {
+            'state': state,
+            'state_trend': state_trend,
+            'previous_action': previous_action,
+            'teacher_q_values': teacher_q_values,
+            'action': action,
+            'reward': reward,
+            'next_state': next_state,
+            'next_state_trend': next_state_trend,
+            'next_previous_action': next_previous_action,
+            'next_teacher_q_values': next_teacher_q_values,
+            'done': terminal
+        }
+        
+        self.multi_step_buffer.append(transition)
+        
+        # Keep buffer size manageable
+        if len(self.multi_step_buffer) > self.n_step * 2:
+            self.multi_step_buffer.pop(0)
+        
+        # Store in replay buffer when we have enough steps or episode ends
+        if len(self.multi_step_buffer) >= self.n_step or terminal:
+            if len(self.multi_step_buffer) >= self.n_step:
+                # Get the transition from n_step ago
+                base_transition = self.multi_step_buffer[-self.n_step]
+                
+                # Calculate n-step return
+                n_step_return = 0
+                gamma_power = 1
+                
+                for i in range(self.n_step):
+                    if len(self.multi_step_buffer) > i:
+                        step_transition = self.multi_step_buffer[-(self.n_step - i)]
+                        n_step_return += gamma_power * step_transition['reward']
+                        gamma_power *= self.gamma
+                        
+                        if step_transition['done']:
+                            break
+                
+                # Store with n-step return
+                self.replay_buffer.store_transition(
+                    base_transition['state'],
+                    base_transition['state_trend'], 
+                    base_transition['previous_action'],
+                    base_transition['teacher_q_values'],
+                    base_transition['action'],
+                    n_step_return,  # Use n-step return instead of single reward
+                    transition['next_state'],  # Use current next_state
+                    transition['next_state_trend'],
+                    transition['next_previous_action'],
+                    transition['next_teacher_q_values'],
+                    terminal
+                )
             
+            # Clear buffer if episode ends
+            if terminal:
+                self.multi_step_buffer.clear()
 
 
 if __name__ == "__main__":
