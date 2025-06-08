@@ -5,3 +5,5 @@ result/high_level
 result/**
 !result/low_level/ETHUSDT/
 !result/low_level/ETHUSDT/**
+echo ".DS_Store" >> ../../.gitignore
+git rm --cached ../../.DS_Store

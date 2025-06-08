@@ -1,0 +1,88 @@
+
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Trading Strategy Performance Report</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                h1, h2 { color: #333; }
+                table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+                tr:nth-child(even) { background-color: #f9f9f9; }
+                .metric-value { font-weight: bold; }
+                .positive { color: green; }
+                .negative { color: red; }
+                .section { margin-bottom: 30px; }
+                img { max-width: 100%; height: auto; margin-bottom: 20px; }
+            </style>
+        </head>
+        <body>
+            <h1>Trading Strategy Performance Report</h1>
+            
+            <div class="section">
+                <h2>Performance Summary</h2>
+                <table>
+                    <tr><th>Metric</th><th>Value</th></tr>
+                    <tr><td>Total Trades</td><td>10</td></tr>
+                    <tr><td>Win Rate</td><td>50.00%</td></tr>
+                    <tr><td>Profit Factor</td><td>1.00</td></tr>
+                    <tr><td>Total Return</td><td class="positive">0.00%</td></tr>
+                    <tr><td>Annualized Return</td><td class="positive">0.00%</td></tr>
+                    <tr><td>Sharpe Ratio</td><td>231.79</td></tr>
+                    <tr><td>Sortino Ratio</td><td>0.00</td></tr>
+                    <tr><td>Maximum Drawdown</td><td class="negative">0.90%</td></tr>
+                    <tr><td>Maximum Drawdown Duration</td><td>2.0 days</td></tr>
+                    <tr><td>Calmar Ratio</td><td>0.00</td></tr>
+                    <tr><td>System Quality Number (SQN)</td><td>0.00</td></tr>
+                </table>
+            </div>
+            
+            <div class="section">
+                <h2>Trade Statistics</h2>
+                <table>
+                    <tr><th>Metric</th><th>Value</th></tr>
+                    <tr><td>Profitable Trades</td><td>5 (50.00%)</td></tr>
+                    <tr><td>Losing Trades</td><td>5 (50.00%)</td></tr>
+                    <tr><td>Average Profit per Trade</td><td class="positive">$0.00 (0.00%)</td></tr>
+                    <tr><td>Average Win</td><td class="positive">$5.00</td></tr>
+                    <tr><td>Average Loss</td><td class="negative">$-5.00</td></tr>
+                    <tr><td>Win/Loss Ratio</td><td>1.00</td></tr>
+                    <tr><td>Expectancy</td><td class="positive">$0.00</td></tr>
+                    <tr><td>Average Holding Period</td><td>1.00 candles</td></tr>
+                    <tr><td>Total Fees</td><td>$1.00</td></tr>
+                </table>
+            </div>
+            
+            <div class="section">
+                <h2>Equity Curve</h2>
+                <img src="equity_curve.png" alt="Equity Curve">
+            </div>
+            
+            <div class="section">
+                <h2>Cumulative Returns</h2>
+                <img src="cumulative_returns.png" alt="Cumulative Returns">
+            </div>
+            
+            <div class="section">
+                <h2>Drawdown Curve</h2>
+                <img src="drawdown_curve.png" alt="Drawdown Curve">
+            </div>
+            
+            <div class="section">
+                <h2>Individual Trade PnL</h2>
+                <img src="trade_pnl.png" alt="Individual Trade PnL">
+            </div>
+            
+            <div class="section">
+                <h2>Monthly Returns Heatmap</h2>
+                <img src="monthly_returns.png" alt="Monthly Returns Heatmap">
+            </div>
+            
+            <div class="section">
+                <h2>Price Chart with Trades</h2>
+                <img src="price_with_trades.png" alt="Price Chart with Trades">
+            </div>
+        </body>
+        </html>
+        
