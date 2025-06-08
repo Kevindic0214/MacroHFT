@@ -133,22 +133,22 @@ class DQN(nn.Module):
         self.n_action = 2
         self.n_state_1 = len(self.tech_indicator_list)
         self.n_state_2 = len(self.tech_indicator_list_trend)
-        self.slope_1 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64).to(
+        self.slope_1 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=False).to(
             self.device
         )
-        self.slope_2 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64).to(
+        self.slope_2 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=False).to(
             self.device
         )
-        self.slope_3 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64).to(
+        self.slope_3 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=False).to(
             self.device
         )
-        self.vol_1 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64).to(
+        self.vol_1 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=False).to(
             self.device
         )
-        self.vol_2 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64).to(
+        self.vol_2 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=False).to(
             self.device
         )
-        self.vol_3 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64).to(
+        self.vol_3 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=False).to(
             self.device
         )
         model_list_slope = [
