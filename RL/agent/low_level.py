@@ -5,6 +5,7 @@ import pickle
 import random
 import sys
 import warnings
+import time
 
 import numpy as np
 import pandas as pd
@@ -367,6 +368,7 @@ class DQN(object):
         best_return_rate = -float('inf')
         best_model = None
         for sample in range(self.epoch_number):
+            epoch_start_time = time.time()
             print('epoch ', epoch_counter + 1)
             random_list = self.train_index[self.label]
             random.shuffle(random_list)
@@ -463,6 +465,9 @@ class DQN(object):
                 
 
             epoch_counter += 1
+            epoch_end_time = time.time()
+            epoch_duration = epoch_end_time - epoch_start_time
+            print(f"Epoch {epoch_counter} completed in {epoch_duration:.2f} seconds.")
             self.epsilon = self.epsilon_scheduler.get_epsilon(epoch_counter)
             mean_return_rate_train = np.mean(epoch_return_rate_train_list)
             mean_final_balance_train = np.mean(epoch_final_balance_train_list)
@@ -561,6 +566,7 @@ class DQN(object):
                 slient=True)
             final_balance = val_env.final_balance
             required_money = val_env.required_money
+            print(f"  > df {df_list[i]}: final_balance={final_balance:.2f}, required_money={required_money:.2f}, profit_margin={(final_balance/required_money if required_money != 0 else 0):.4f}")
             action_list.append(action_list_episode)
             reward_list.append(reward_list_episode)
             final_balance_list.append(final_balance)
