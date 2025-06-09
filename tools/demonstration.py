@@ -10,8 +10,8 @@ def make_q_table_reward(df: pd.DataFrame,
                         commission_fee=0.001,
                         max_punish=1e12,
                         # C51 parameters for teacher distribution
-                        v_min=-5.0, 
-                        v_max=5.0, 
+                        v_min=-10.0, 
+                        v_max=10.0, 
                         num_atoms=51):
     
     delta_z = (v_max - v_min) / (num_atoms - 1)
