@@ -467,12 +467,12 @@ class DQN(object):
             epoch_counter += 1
             epoch_end_time = time.time()
             epoch_duration = epoch_end_time - epoch_start_time
-            print(f"Epoch {epoch_counter} completed in {epoch_duration:.2f} seconds.")
             self.epsilon = self.epsilon_scheduler.get_epsilon(epoch_counter)
             mean_return_rate_train = np.mean(epoch_return_rate_train_list)
             mean_final_balance_train = np.mean(epoch_final_balance_train_list)
             mean_required_money_train = np.mean(epoch_required_money_train_list)
             mean_reward_sum_train = np.mean(epoch_reward_sum_train_list)
+            print(f"Epoch {epoch_counter} completed in {epoch_duration:.2f}s. Avg Train Balance: {mean_final_balance_train:.2f}, Avg Train Required Money: {mean_required_money_train:.2f}")
             self.writer.add_scalar(
                     tag="epoch_return_rate_train",
                     scalar_value=mean_return_rate_train,
