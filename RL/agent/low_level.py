@@ -78,8 +78,8 @@ class DQN(object):
             self.device = torch.device("cpu")
         
         # C51 parameters (consistent for agent and teacher generation)
-        self.v_min = -5.0
-        self.v_max = 5.0
+        self.v_min = -10.0
+        self.v_max = 10.0
         self.num_atoms = 51
         self.support = torch.linspace(self.v_min, self.v_max, self.num_atoms).to(self.device)
         self.delta_z = (self.v_max - self.v_min) / (self.num_atoms - 1)

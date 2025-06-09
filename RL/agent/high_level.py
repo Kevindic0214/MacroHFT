@@ -218,8 +218,8 @@ class DQN(nn.Module):
 
         # Define support for C51 Q-value calculation
         self.num_atoms = 51  # Assuming same as subagent, also make it an attribute
-        v_min = -5.0    # Assuming same as subagent
-        v_max = 5.0     # Assuming same as subagent
+        v_min = -10.0    # Assuming same as subagent
+        v_max = 10.0     # Assuming same as subagent
         support = torch.linspace(v_min, v_max, self.num_atoms)
         self.register_buffer('support', support.to(self.device))
 

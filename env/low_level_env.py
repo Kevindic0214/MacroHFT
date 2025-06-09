@@ -183,8 +183,8 @@ class Training_Env(Testing_Env):
         max_holding_number=max_holding_number,
         initial_action = 0,
         alpha=alpha,
-        v_min_teacher=-5.0, 
-        v_max_teacher=5.0, 
+        v_min_teacher=-10.0, 
+        v_max_teacher=10.0, 
         num_atoms_teacher=51
     ):
         super(Training_Env,

@@ -58,7 +58,7 @@ class NoisyLinear(nn.Module):
 
 
 class subagent(nn.Module):
-    def __init__(self, state_dim_1, state_dim_2, action_dim, hidden_dim, num_atoms=51, v_min=-5.0, v_max=5.0, use_noisy=True):
+    def __init__(self, state_dim_1, state_dim_2, action_dim, hidden_dim, num_atoms=51, v_min=-10.0, v_max=10.0, use_noisy=True):
         super(subagent, self).__init__()
         self.action_dim = action_dim
         self.num_atoms = num_atoms
