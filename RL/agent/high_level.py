@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
 
@@ -55,7 +56,7 @@ parser.add_argument("--transcation_cost", type=float, default=0.2 / 1000)
 parser.add_argument("--back_time_length", type=int, default=1)
 parser.add_argument("--seed", type=int, default=12345)
 parser.add_argument("--n_step", type=int, default=1)
-parser.add_argument("--epoch_number", type=int, default=8)
+parser.add_argument("--epoch_number", type=int, default=15)
 parser.add_argument("--device", type=str, default="cuda:0")
 parser.add_argument("--alpha", type=float, default=0.5)
 parser.add_argument("--beta", type=int, default=5)
@@ -133,22 +134,22 @@ class DQN(nn.Module):
         self.n_action = 2
         self.n_state_1 = len(self.tech_indicator_list)
         self.n_state_2 = len(self.tech_indicator_list_trend)
-        self.slope_1 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=False).to(
+        self.slope_1 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=True).to(
             self.device
         )
-        self.slope_2 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=False).to(
+        self.slope_2 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=True).to(
             self.device
         )
-        self.slope_3 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=False).to(
+        self.slope_3 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=True).to(
             self.device
         )
-        self.vol_1 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=False).to(
+        self.vol_1 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=True).to(
             self.device
         )
-        self.vol_2 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=False).to(
+        self.vol_2 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=True).to(
             self.device
         )
-        self.vol_3 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=False).to(
+        self.vol_3 = subagent(self.n_state_1, self.n_state_2, self.n_action, 64, use_noisy=True).to(
             self.device
         )
         model_list_slope = [
@@ -179,6 +180,7 @@ class DQN(nn.Module):
         self.vol_3.load_state_dict(
             torch.load(model_list_vol[2], map_location=self.device)
         )
+        print("All sub-agents loaded successfully.")
         self.slope_1.eval()
         self.slope_2.eval()
         self.slope_3.eval()
@@ -194,6 +196,7 @@ class DQN(nn.Module):
             self.n_state_1, self.n_state_2, self.n_action, 32
         ).to(self.device)
         self.hyperagent_target.load_state_dict(self.hyperagent.state_dict())
+        print("Hyper-agent and target network initialized.")
         self.update_times = args.update_times
         self.optimizer = torch.optim.Adam(self.hyperagent.parameters(), lr=args.lr)
         self.loss_func = nn.MSELoss()
@@ -477,7 +480,7 @@ class DQN(nn.Module):
             args, self.n_state_1, self.n_state_2, self.n_action, num_atoms=self.num_atoms
         )
         for sample in range(self.epoch_number):
-            print("epoch ", epoch_counter + 1)
+            print(f"\n--- Starting Epoch {epoch_counter + 1}/{self.epoch_number} ---")
             epoch_start_time = time.time()
             self.df = pd.read_feather(
                 os.path.join(self.train_data_path, "train.feather")
@@ -496,7 +499,8 @@ class DQN(nn.Module):
             )
             s, s2, s3, info = train_env.reset()
             episode_reward_sum = 0
-
+            
+            pbar = tqdm(total=len(self.df) - self.back_time_length, desc=f"Epoch {epoch_counter + 1} Progress")
             while True:
                 a = self.act(s, s2, s3, info)
                 s_, s2_, s3_, r, done, info_ = train_env.step(a)
@@ -530,6 +534,7 @@ class DQN(nn.Module):
                 if step_counter % self.eval_update_freq == 0 and step_counter > (
                     self.batch_size + self.n_step
                 ):
+                    print(f"--- [Step {step_counter}] Triggering network update ({self.update_times} times)...")
                     for i in range(self.update_times):
                         td_error, memory_error, KL_loss, q_eval, q_target = self.update(
                             self.replay_buffer
@@ -566,14 +571,20 @@ class DQN(nn.Module):
                                 walltime=None,
                             )
                     if step_counter > 4320:
+                        print(f"--- [Step {step_counter}] Re-encoding episodic memory...")
                         self.memory.re_encode(self.hyperagent)
                 if done:
                     break
+                pbar.update(1)
+
+            pbar.close()
             episode_counter += 1
             final_balance, required_money = (
                 train_env.final_balance,
                 train_env.required_money,
             )
+            return_rate = final_balance / required_money if required_money != 0 else 0
+            print(f"  > Training Epoch {epoch_counter + 1} Summary: Final Balance={final_balance:.2f}, Required Money={required_money:.2f}, Return Rate={return_rate:.4f}")
             self.writer.add_scalar(
                 tag="return_rate_train",
                 scalar_value=final_balance / (required_money),
@@ -598,14 +609,14 @@ class DQN(nn.Module):
                 global_step=episode_counter,
                 walltime=None,
             )
-            epoch_return_rate_train_list.append(final_balance / (required_money))
+            epoch_return_rate_train_list.append(return_rate)
             epoch_final_balance_train_list.append(final_balance)
             epoch_required_money_train_list.append(required_money)
             epoch_reward_sum_train_list.append(episode_reward_sum)
 
             epoch_end_time = time.time()
             epoch_duration = epoch_end_time - epoch_start_time
-            print(f"Epoch {epoch_counter} completed in {epoch_duration:.2f} seconds.")
+            print(f"--- Epoch {epoch_counter + 1} completed in {epoch_duration:.2f} seconds. ---")
 
             epoch_counter += 1
             self.epsilon = self.epsilon_scheduler.get_epsilon(epoch_counter)
@@ -644,13 +655,17 @@ class DQN(nn.Module):
                 self.hyperagent.state_dict(),
                 os.path.join(epoch_path, "trained_model.pkl"),
             )
+            print(f"  > Saved model for epoch {epoch_counter} to {epoch_path}")
             val_path = os.path.join(epoch_path, "val")
             if not os.path.exists(val_path):
                 os.makedirs(val_path)
+            print(f"--- Running validation for epoch {epoch_counter}...")
             return_rate_eval = self.val_cluster(epoch_path, val_path)
+            print(f"  > Validation Return Rate: {return_rate_eval:.4f}")
             if return_rate_eval > best_return_rate:
                 best_return_rate = return_rate_eval
                 best_model = self.hyperagent.state_dict()
+                print(f"  > New best model found at epoch {epoch_counter} with return rate {best_return_rate:.4f}!")
             epoch_return_rate_train_list = []
             epoch_final_balance_train_list = []
             epoch_required_money_train_list = []
@@ -659,12 +674,16 @@ class DQN(nn.Module):
             self.model_path, "best_model.pkl"
         )
         torch.save(best_model, best_model_path)
+        print(f"\nTraining finished. Best model saved to {best_model_path}")
+        print("--- Starting final testing with best model...")
         final_result_path = self.model_path
         self.test_cluster(best_model_path, final_result_path)
 
     def val_cluster(self, model_path, save_path):
+        model_file = os.path.join(model_path, "trained_model.pkl")
+        print(f"  > Loading model for validation from: {model_file}")
         self.hyperagent.load_state_dict(
-            torch.load(os.path.join(model_path, "trained_model.pkl"))
+            torch.load(model_file)
         )
         self.hyperagent.eval()
         counter = False
@@ -686,6 +705,7 @@ class DQN(nn.Module):
             initial_action=0,
         )
         s, s2, s3, info = val_env.reset()
+        print("  > Validation environment reset.")
         done = False
         action_list_episode = []
         reward_list_episode = []
@@ -698,6 +718,7 @@ class DQN(nn.Module):
         portfit_magine, final_balance, required_money, commission_fee = (
             val_env.get_final_return_rate(slient=True)
         )
+        print(f"  > Validation on df: final_balance={final_balance:.2f}, required_money={required_money:.2f}, profit_margin={(final_balance/required_money if required_money != 0 else 0):.4f}")
         final_balance = val_env.final_balance
         action_list.append(action_list_episode)
         reward_list.append(reward_list_episode)
@@ -721,6 +742,7 @@ class DQN(nn.Module):
         return return_rate
 
     def test_cluster(self, epoch_path, save_path):
+        print(f"  > Loading best model for testing from: {epoch_path}")
         self.hyperagent.load_state_dict(torch.load(epoch_path))
         self.hyperagent.eval()
         counter = False
@@ -742,6 +764,7 @@ class DQN(nn.Module):
             initial_action=0,
         )
         s, s2, s3, info = test_env.reset()
+        print("  > Testing environment reset.")
         done = False
         action_list_episode = []
         reward_list_episode = []
@@ -754,6 +777,7 @@ class DQN(nn.Module):
         portfit_magine, final_balance, required_money, commission_fee = (
             test_env.get_final_return_rate(slient=True)
         )
+        print(f"  > Final Test Result: final_balance={final_balance:.2f}, required_money={required_money:.2f}, profit_margin={(final_balance/required_money if required_money != 0 else 0):.4f}")
         final_balance = test_env.final_balance
         action_list.append(action_list_episode)
         reward_list.append(reward_list_episode)
@@ -773,6 +797,7 @@ class DQN(nn.Module):
         np.save(
             os.path.join(save_path, "commission_fee_history.npy"), commission_fee_list
         )
+        print(f"Final test results saved to {save_path}")
 
 
 if __name__ == "__main__":
