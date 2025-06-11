@@ -500,7 +500,7 @@ class DQN(nn.Module):
             s, s2, s3, info = train_env.reset()
             episode_reward_sum = 0
             
-            pbar = tqdm(total=len(self.df) - self.back_time_length, desc=f"Epoch {epoch_counter + 1} Progress")
+            pbar = tqdm(total=len(self.df) - self.back_time_length, desc=f"Epoch {epoch_counter + 1} Progress", mininterval=15.0)
             while True:
                 a = self.act(s, s2, s3, info)
                 s_, s2_, s3_, r, done, info_ = train_env.step(a)
