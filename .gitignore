@@ -1,4 +1,63 @@
-data/ETHUSDT
-logs/
-**/__pycache__/
-result/
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project Specific - Data & Results
+/data/
+/logs/
+/result/
+/results/
+/performance/dynamic_result/
+/performance/macrohft_result/
+/performance/multipatchformer_result/
+/performance/qrdqn_result/
+/performance/rainbowdqn_result/
+/performance/performance_analysis_output/
+
+# Large Files (training artifacts) — keep curated portfolio assets under docs/
+*.npy
+*.pth
+*.pkl
+*.feather
+*.csv
+*.png
+*.jpg
+*.jpeg
+*.zip
+
+# Allow documentation/portfolio artifacts
+!docs/**/*.png
+!docs/**/*.jpg
+!docs/**/*.jpeg
+!docs/**/*.pdf
+!docs/**/*.csv
+
+# OS
+.DS_Store
+Thumbs.db
