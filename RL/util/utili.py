@@ -9,10 +9,15 @@ def mps_available():
 def resolve_device(requested="cuda:0"):
     """Resolve the training device, falling back when the request is unavailable.
 
-    Honours an explicit request whenever its backend is present, otherwise
-    picks the best backend available: cuda, then Apple Silicon's Metal
-    backend (mps), then cpu. This keeps the cuda:N arguments in scripts/
-    working unchanged while letting the same scripts use the GPU on a Mac.
+    Honours an explicit request whenever its backend is present, so the
+    cuda:N arguments hardcoded in scripts/ keep working on a CUDA host and
+    --device mps is available to anyone who wants to try it.
+
+    The automatic fallback is cuda -> cpu, deliberately skipping mps: this
+    agent selects actions one state at a time, and a batch-1 forward pass is
+    ~15x slower on mps than on cpu because kernel dispatch dwarfs the actual
+    math at this model size. Measured end-to-end over 4000 env steps of
+    low_level training on an M-series machine, cpu 3.4s vs mps 6.0s.
     """
     requested = str(requested)
     if requested.startswith("cuda") and torch.cuda.is_available():
@@ -23,8 +28,6 @@ def resolve_device(requested="cuda:0"):
         return torch.device("cpu")
     if torch.cuda.is_available():
         return torch.device("cuda:0")
-    if mps_available():
-        return torch.device("mps")
     return torch.device("cpu")
 
 def get_ada(ada,decay_freq=2,ada_counter=0, decay_coffient=0.5):

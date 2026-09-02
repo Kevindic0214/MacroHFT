@@ -114,15 +114,24 @@ pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
 pip install -r requirements.txt
 ```
 
-### Apple Silicon
+### Apple Silicon — and why the GPU is the wrong choice here
 
-Training also runs on a Mac without changes: `resolve_device()` in [`RL/util/utili.py`](RL/util/utili.py) honours a `--device` you can actually use and otherwise falls back cuda → mps → cpu, so the `cuda:N` arguments hardcoded in `scripts/` transparently land on Metal. Measured on an M-series MacBook Pro, one gradient update on the sub-agent network (batch 512):
+Training runs on a Mac without changes: `resolve_device()` in [`RL/util/utili.py`](RL/util/utili.py) honours a `--device` whose backend actually exists and otherwise falls back cuda → cpu, so the `cuda:N` arguments hardcoded in `scripts/` land on CPU rather than crashing.
 
-| | CPU | MPS |
-|---|---:|---:|
-| ms / update | 3.14 | 1.47 |
+The fallback deliberately skips Metal (`mps`), which is not the obvious choice. Profiling 4000 env steps of `low_level` training on an M-series machine:
 
-That is ~2× on the update step alone, and MPS time is nearly flat from batch 128 to 2048 (1.46 → 1.51 ms) — the step is dispatch-bound rather than compute-bound at this model size. Two caveats: `scripts/low_level.sh` and `high_level.sh` launch 6 and 4 jobs in parallel across distinct `cuda:N` devices, which on a Mac all contend for the one GPU (run them sequentially instead), and end-to-end training is still far slower than the ~2h/sub-agent the paper's 3090 setup gets.
+| phase | batch | CPU | MPS |
+|---|---:|---:|---:|
+| `agent.act` (action selection) | 1 | 0.18s | 2.67s |
+| `agent.update` (gradient step) | 512 | 1.91s | 2.00s |
+| `env.step` | — | 1.26s | 1.33s |
+| **total** | | **3.4s** | **6.0s** |
+
+**CPU is 1.8× faster than the GPU end-to-end.** The reason is the batch-1 forward: a DQN picks actions one state at a time, and there are 4000 of those per 350 gradient updates. At this model size a single-sample forward is pure kernel-dispatch overhead — 15× slower on Metal than on CPU — and that one line dominates everything else. Even the batch-512 update, where the GPU should win, is a wash once the host→device copy of each sampled batch is counted.
+
+Worth knowing because the isolated microbenchmark points the other way: timing the network's forward+backward alone at batch 512 gives CPU 3.14 ms vs MPS 1.47 ms, an apparent 2× win for the GPU. That number is real and completely misleading about the training loop it lives in.
+
+One further caveat: `scripts/low_level.sh` and `high_level.sh` launch 6 and 4 jobs in parallel across distinct `cuda:N` devices. On a Mac those become 6 and 4 concurrent CPU processes — run them sequentially, or expect them to fight over cores.
 
 ## Teammate contributions
 
