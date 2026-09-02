@@ -22,7 +22,7 @@ from env.high_level_env import Testing_Env, Training_Env
 from model.net import hyperagent, subagent
 from RL.util.memory import episodicmemory
 from RL.util.replay_buffer import ReplayBuffer_High
-from RL.util.utili import LinearDecaySchedule
+from RL.util.utili import LinearDecaySchedule, resolve_device
 
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
@@ -87,10 +87,8 @@ class DQN(object):
     def __init__(self, args):  # 定义DQN的一系列属性
         self.seed = args.seed
         seed_torch(self.seed)
-        if torch.cuda.is_available():
-            self.device = torch.device(args.device)
-        else:
-            self.device = torch.device("cpu")
+        self.device = resolve_device(args.device)
+        print(f"using device: {self.device}")
         self.result_path = os.path.join(
             "./result/high_level", "{}".format(args.dataset), args.exp
         )

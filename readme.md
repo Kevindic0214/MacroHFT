@@ -114,6 +114,16 @@ pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
 pip install -r requirements.txt
 ```
 
+### Apple Silicon
+
+Training also runs on a Mac without changes: `resolve_device()` in [`RL/util/utili.py`](RL/util/utili.py) honours a `--device` you can actually use and otherwise falls back cuda → mps → cpu, so the `cuda:N` arguments hardcoded in `scripts/` transparently land on Metal. Measured on an M-series MacBook Pro, one gradient update on the sub-agent network (batch 512):
+
+| | CPU | MPS |
+|---|---:|---:|
+| ms / update | 3.14 | 1.47 |
+
+That is ~2× on the update step alone, and MPS time is nearly flat from batch 128 to 2048 (1.46 → 1.51 ms) — the step is dispatch-bound rather than compute-bound at this model size. Two caveats: `scripts/low_level.sh` and `high_level.sh` launch 6 and 4 jobs in parallel across distinct `cuda:N` devices, which on a Mac all contend for the one GPU (run them sequentially instead), and end-to-end training is still far slower than the ~2h/sub-agent the paper's 3090 setup gets.
+
 ## Teammate contributions
 
 Alongside the Dynamic Hybrid work above, **Chien-Cheng Chu** built the project's baselines and evaluation tooling, brought over from his [`chuchu`](https://github.com/Kevindic0214/MacroHFT/tree/chuchu) branch:
