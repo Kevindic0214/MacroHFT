@@ -114,12 +114,21 @@ pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
 pip install -r requirements.txt
 ```
 
+## Teammate contributions
+
+Alongside the Dynamic Hybrid work above, **Chien-Cheng Chu** built the project's baselines and evaluation tooling, brought over from his [`chuchu`](https://github.com/Kevindic0214/MacroHFT/tree/chuchu) branch:
+
+- [`atr_baseline/`](atr_baseline) — ATR trend-following strategy backtest, used as a non-RL baseline.
+- [`ppo_baseline/`](ppo_baseline) — PPO strategy baseline (Stable-Baselines3), with its own backtest/report pipeline.
+- [`model/multipatchformer.py`](model/multipatchformer.py) — Multi-Patch Former model integration, explored as an alternative sub-agent backbone.
+- [`performance/performance_analyzer.py`](performance/performance_analyzer.py) — the evaluation pipeline used to generate the per-strategy performance reports under [`performance/performance_analysis_output/`](performance/performance_analysis_output) (metrics, equity curves, drawdown, trade PnL for every strategy variant, including Dynamic Hybrid).
+
 ## Attribution
 
 - **Original MacroHFT framework**: Zong et al., *MacroHFT: Memory Augmented Context-aware Reinforcement Learning On High Frequency Trading*, KDD 2024. [paper](https://arxiv.org/abs/2406.14537) · [upstream repo](https://github.com/ZONG0004/MacroHFT)
 - **This work**: NYCU IOC 535514 team project, Spring 2025.
   - **Hung-Ting Hsieh** (this repo's author) — Dynamic Hybrid mechanism, Rainbow DQN, QR-DQN, methodology in team report.
-  - Chien-Cheng Chu — ATR baseline, PPO baseline, Multi-Patch Former integration, evaluation pipeline (his work lives on the [`chuchu`](https://github.com/Kevindic0214/MacroHFT/tree/chuchu) branch and is described in the team report).
+  - Chien-Cheng Chu — ATR baseline, PPO baseline, Multi-Patch Former integration, evaluation pipeline (see [Teammate contributions](#teammate-contributions) above; full context in the team report).
   - Chun-Yu Lin — literature review.
 
 Citing this work? Please cite the original MacroHFT paper. Open an issue if you'd like the team report's BibTeX entry.

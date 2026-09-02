@@ -1,0 +1,2 @@
+total_trades,profitable_trades,losing_trades,win_rate,total_profit,total_return,trading_days,years,annualized_return,daily_returns_mean,daily_returns_std,sharpe_ratio,sortino_ratio,max_drawdown,max_drawdown_duration,calmar_ratio,avg_profit_per_trade,avg_profit_pct_per_trade,avg_win,avg_loss,win_loss_ratio,profit_factor,avg_holding_periods,total_fees,expectancy,sqn
+10,5,5,0.5,0,0.0,99.0,0.27104722792607805,0.0,0.006976043483370529,0.001408939596263305,231.7861820787238,0,0.009,2.0,0.0,0.0,0.0,5.0,-5.0,1.0,1.0,1.0,1.0,0.0,0.0
