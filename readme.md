@@ -127,9 +127,9 @@ The fallback deliberately skips Metal (`mps`), which is not the obvious choice. 
 | `env.step` | — | 1.26s | 1.33s |
 | **total** | | **3.4s** | **6.0s** |
 
-**CPU is 1.8× faster than the GPU end-to-end.** The reason is the batch-1 forward: a DQN picks actions one state at a time, and there are 4000 of those per 350 gradient updates. At this model size a single-sample forward is pure kernel-dispatch overhead — 15× slower on Metal than on CPU — and that one line dominates everything else. Even the batch-512 update, where the GPU should win, is a wash once the host→device copy of each sampled batch is counted.
+**CPU is 1.8× faster than the GPU end-to-end.** The reason is the batch-1 forward: a DQN picks actions one state at a time, and there are 4000 of those per 350 gradient updates. The sub-agent is a 45,507-parameter MLP, so a single-sample forward is almost entirely kernel-dispatch overhead — 15× slower on Metal than on CPU — and that one line dominates everything else. Even the batch-512 update, where the GPU should win, is a wash once the host→device copy of each sampled batch is counted.
 
-Worth knowing because the isolated microbenchmark points the other way: timing the network's forward+backward alone at batch 512 gives CPU 3.14 ms vs MPS 1.47 ms, an apparent 2× win for the GPU. That number is real and completely misleading about the training loop it lives in.
+Worth knowing because the isolated microbenchmark points the other way: timing the network's forward+backward alone at batch 512 gives CPU 1.67 ms vs MPS 1.20 ms, an apparent 1.4× win for the GPU. That number is real and completely misleading about the training loop it lives in.
 
 One further caveat: `scripts/low_level.sh` and `high_level.sh` launch 6 and 4 jobs in parallel across distinct `cuda:N` devices. On a Mac those become 6 and 4 concurrent CPU processes — run them sequentially, or expect them to fight over cores.
 

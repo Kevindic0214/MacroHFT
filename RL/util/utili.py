@@ -15,9 +15,9 @@ def resolve_device(requested="cuda:0"):
 
     The automatic fallback is cuda -> cpu, deliberately skipping mps: this
     agent selects actions one state at a time, and a batch-1 forward pass is
-    ~15x slower on mps than on cpu because kernel dispatch dwarfs the actual
-    math at this model size. Measured end-to-end over 4000 env steps of
-    low_level training on an M-series machine, cpu 3.4s vs mps 6.0s.
+    ~15x slower on mps than on cpu: the sub-agent is a 45k-parameter MLP, so
+    kernel dispatch dwarfs the actual math. Measured end-to-end over 4000 env
+    steps of low_level training on an M-series machine, cpu 3.4s vs mps 6.0s.
     """
     requested = str(requested)
     if requested.startswith("cuda") and torch.cuda.is_available():
